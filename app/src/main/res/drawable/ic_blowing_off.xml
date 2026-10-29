@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_blowing_off -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <group>
+        <clip-path android:pathData="M0,0h64v64h-64z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M47.5999,12.8C45.6117,12.8 43.9999,14.4118 43.9999,16.4C43.9999,18.3883 45.6117,20 47.5999,20C49.5882,20 51.1999,18.3883 51.1999,16.4C51.1999,14.4118 49.5882,12.8 47.5999,12.8ZM17.0208,50.4001H20.7826L27.5595,39.4338L41.562,40.5669L48.7999,24H45.3079L39.5439,37.1932L25.8664,36.0863L17.0208,50.4001Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M40.3013,16.0818H34.6645V19.7634H39.7397V21.989H34.6645V28.0002H32.1269V13.8562H40.3013V16.0818Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M29.9623,16.0818H24.3255V19.7634H29.4007V21.989H24.3255V28.0002H21.7879V13.8562H29.9623V16.0818Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M13.3471,28.3122C9.9359,28.3122 7.1279,25.7122 7.1279,21.3442V20.5122C7.1279,16.1442 9.9359,13.5442 13.3471,13.5442H13.4927C16.8831,13.5442 19.7119,16.1442 19.7119,20.5122V21.3442C19.7119,25.7122 16.8831,28.3122 13.4927,28.3122H13.3471ZM13.3471,26.0866H13.4927C15.4063,26.0866 16.6543,24.6722 16.9663,23.4866C17.0079,23.029 17.0287,21.9266 17.0287,20.9282C17.0287,19.9298 17.0079,18.8066 16.9663,18.3698C16.6543,17.1842 15.4063,15.7698 13.4927,15.7698H13.3471C11.4335,15.7698 10.1855,17.1842 9.8735,18.3698C9.8319,18.8066 9.8111,19.9298 9.8111,20.9282C9.8111,21.9266 9.8319,23.029 9.8735,23.4866C10.1855,24.6722 11.4335,26.0866 13.3471,26.0866Z" />
+    </group>
+</vector>

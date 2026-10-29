@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_mycar -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="65dp"
+    android:height="64dp"
+    android:viewportWidth="65"
+    android:viewportHeight="64">
+    <group>
+        <clip-path android:pathData="M0.4443,0h64v64h-64z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M16.4441,32.8V36H23.4553L25.0553,39.2H39.833L41.433,36H48.4445V32.8H16.4441Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M19.3892,15.2002H45.4993L50.5935,27.0867L50.8441,27.3373V25.6002H55.6441V28.8002H52.307L54.0443,30.5375V48.8002H43.195L42.395,45.6002H22.4935L21.6935,48.8002H10.8443V30.5375L12.5815,28.8002H9.2441V25.6002H14.0441V27.3376L14.295,27.0867L19.3892,15.2002ZM21.4993,18.4002L16.9935,28.9137L14.0443,31.8629V45.6002H19.195L19.995,42.4002H44.8935L45.6935,45.6002H50.8443V31.8629L47.895,28.9137L43.3892,18.4002H21.4993Z" />
+    </group>
+</vector>

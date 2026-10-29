@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置：放行「私网地址」的明文 HTTP。
+
+  为什么需要：minSdk 28（Android 9）起系统默认禁止明文流量，
+  自建日志服务走 http://192.168.x.x:8080 会被直接拦截，表现就是「上传不了」。
+  默认上传端点（境内自建日志服务）是 HTTPS，不受影响。
+
+  这里只放行私网段（10.x / 172.16-31.x / 192.168.x / 127.0.0.1），不放行公网 HTTP。
+  注意：Android 的 <domain> 匹配是按后缀做的，写 "124.9" 这类片段无法精确表达 IP 段，
+  所以这里用私网根域 + cleartextTrafficPermitted，对本工具场景够用且风险可控。
+-->
+<network-security-config>
+
+    <!-- 默认全部走 HTTPS、禁明文 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 私网地址（自建日志服务 / 本机调试）允许明文 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- 10.0.0.0/8 -->
+        <domain includeSubdomains="true">10</domain>
+        <!-- 172.16.0.0/12 —— 写出 172.16 ~ 172.31 各段 -->
+        <domain includeSubdomains="true">172.16</domain>
+        <domain includeSubdomains="true">172.17</domain>
+        <domain includeSubdomains="true">172.18</domain>
+        <domain includeSubdomains="true">172.19</domain>
+        <domain includeSubdomains="true">172.20</domain>
+        <domain includeSubdomains="true">172.21</domain>
+        <domain includeSubdomains="true">172.22</domain>
+        <domain includeSubdomains="true">172.23</domain>
+        <domain includeSubdomains="true">172.24</domain>
+        <domain includeSubdomains="true">172.25</domain>
+        <domain includeSubdomains="true">172.26</domain>
+        <domain includeSubdomains="true">172.27</domain>
+        <domain includeSubdomains="true">172.28</domain>
+        <domain includeSubdomains="true">172.29</domain>
+        <domain includeSubdomains="true">172.30</domain>
+        <domain includeSubdomains="true">172.31</domain>
+        <!-- 192.168.0.0/16 -->
+        <domain includeSubdomains="true">192.168</domain>
+        <!-- 本机 -->
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+
+</network-security-config>

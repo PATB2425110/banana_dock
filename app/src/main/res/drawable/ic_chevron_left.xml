@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_arrow_left -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="88dp"
+    android:height="88dp"
+    android:viewportWidth="88"
+    android:viewportHeight="88">
+    <path
+        android:fillColor="#ffffffff"
+        android:fillAlpha="0.9"
+        android:fillType="evenOdd"
+        android:pathData="M59.4,62.298V67.503L58.225,66.76L27.425,47.302L26.4,46.654V45.442V42.559V41.347L27.425,40.699L58.225,21.24L59.4,20.498V25.703L30.8,43.771V44.229L59.4,62.298Z" />
+</vector>

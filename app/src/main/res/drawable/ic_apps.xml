@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_app_list -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="65dp"
+    android:height="64dp"
+    android:viewportWidth="65"
+    android:viewportHeight="64">
+    <group>
+        <clip-path android:pathData="M0.2227,0h64v64h-64z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M13.0225,12.8V29.6H29.8225V26.4H16.2225V16H29.8225V12.8H13.0225Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M13.0225,34.4V51.2001H29.8225V34.4H13.0225ZM16.2225,48V37.6H26.6225V48H16.2225Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M34.6225,12.8H51.4225V29.6H34.6225V12.8ZM37.8225,16V26.4H48.2225V16H37.8225Z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M34.6225,34.4V51.2001H51.4225V34.4H34.6225ZM37.8225,48V37.6H48.2225V48H37.8225Z" />
+    </group>
+</vector>

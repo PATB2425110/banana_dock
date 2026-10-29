@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_play_music_normal
+     ★ v3.13.2：裁掉原 56×56 viewport 的空白边距（同 ic_pause）。
+       原图形实际只占 x 15.402~43.238 / y 11.473~44.524，
+       FIT_CENTER 按整个 viewport 缩放 → 放大倍数被空白吃掉。
+       现在 viewport = 图形边界，图形铺满画布。
+     ★ fillAlpha 由 0.3 提到 0.9：与 pause 图标（0.9）保持一致，
+       否则播放/暂停两种状态一个亮一个淡，看起来像"按钮消失"。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="27.836dp"
+    android:height="33.051dp"
+    android:viewportWidth="27.836"
+    android:viewportHeight="33.051">
+    <group
+        android:translateX="-15.402"
+        android:translateY="-11.473">
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M38.923,27.998L18.854,16.558L18.854,39.439L38.923,27.998ZM43.238,29.475C44.389,28.819 44.389,27.178 43.238,26.522L17.991,12.129C16.84,11.473 15.402,12.293 15.402,13.606L15.402,42.391C15.402,43.703 16.84,44.524 17.991,43.868L43.238,29.475Z" />
+    </group>
+</vector>

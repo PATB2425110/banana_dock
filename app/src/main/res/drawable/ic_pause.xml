@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_pause_music
+     ★ v3.13.2：裁掉原 56×56 viewport 的空白边距。
+       原图形实际只占 x 18.148~37.747 / y 12.547~44.047（宽仅占 35%），
+       而 ImageView 用 FIT_CENTER 是按**整个 viewport** 缩放，
+       于是放大倍数全被四周空白吃掉 → 看起来永远很小。
+       现在 viewport 直接等于图形边界，图形铺满画布：
+       ImageView 给多少 px，屏幕上就显示多少 px。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="19.599dp"
+    android:height="31.5dp"
+    android:viewportWidth="19.599"
+    android:viewportHeight="31.5">
+    <group
+        android:translateX="-18.148"
+        android:translateY="-12.547">
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M18.848,12.547L21.648,12.547A0.7,0.7 0,0 1,22.348 13.247L22.348,43.347A0.7,0.7 0,0 1,21.648 44.047L18.848,44.047A0.7,0.7 0,0 1,18.148 43.347L18.148,13.247A0.7,0.7 0,0 1,18.848 12.547z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:pathData="M34.247,12.547L37.047,12.547A0.7,0.7 0,0 1,37.747 13.247L37.747,43.347A0.7,0.7 0,0 1,37.047 44.047L34.247,44.047A0.7,0.7 0,0 1,33.547 43.347L33.547,13.247A0.7,0.7 0,0 1,34.247 12.547z" />
+    </group>
+</vector>

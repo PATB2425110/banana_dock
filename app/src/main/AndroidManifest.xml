@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14（API 34）起前台服务必须声明类型，否则 startForeground() 抛
+         MissingForegroundServiceTypeException 直接闪退 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 歌词悬浮窗：本地 .lrc 兜底找词需要读公共目录（车机上授权即可，不授权也能跑） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- API 33+ 细分权限：读音频文件（含 .lrc 歌词） -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 歌词联网抓取（网易云 / LRCLIB / 自定义接口）。少了它 HttpURLConnection 会抛
+         SecurityException: Permission denied (missing INTERNET permission?)，
+         表现就是「歌词不能联网获取」 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- ================= 以下权限为对齐「领克OSN车机助手」(cn.navitool) ================= -->
+    <!-- 车控：ECarX adaptapi 车辆信号读写。
+         CAR_INFO/CONTROL_CAR_CLIMATE/CAR_ENERGY/CAR_EXTERIOR_ENVIRONMENT 是
+         读档位传感器(0x200200)、写空调内外循环(0x10030100)等车控操作的授权基础；
+         这几个是 signature|privileged 权限，只有以系统/特权应用安装时才会真正授予。 -->
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
+    <uses-permission android:name="android.car.permission.CONTROL_CAR_CLIMATE" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="android.car.permission.CAR_EXTERIOR_ENVIRONMENT" />
+    <!-- 特权写入：Settings.Secure / 平台超级用户通道（系统级安装才生效） -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_SUPERUSER" />
+    <!-- 吉利应用商店内容提供者访问 -->
+    <uses-permission android:name="com.geely.appstore.APPSTORE_PROVIDER" />
+    <!-- 全盘文件访问（OSN 用于歌词/配置落盘；授权后 ACTION_MANAGE_ALL_FILES 才可用） -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- 旧版存储写权限（minSdk 28，仅 API 28 有效，29+ 由 MANAGE_EXTERNAL_STORAGE 接管） -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- 保活与自管理 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.READ_LOGS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- dataSync 型前台服务类型（OSN 声明；本 App 当前未用该类型，仅对齐权限清单） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Android 11+ 包可见性：只声明 QUERY_ALL_PACKAGES 在 API 34 上已不再可靠，
+         必须显式声明要访问的车机包名，否则 query 其 ContentProvider / 拉起其 Activity
+         会被系统过滤掉（表现为「点了没反应」）。 -->
+    <queries>
+        <package android:name="com.geely.hvac" />
+        <package android:name="com.geely.dockbar" />
+        <package android:name="com.android.launcher3" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".App"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.CarDockBar">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true"
+            android:launchMode="standard"
+            android:theme="@style/Theme.CarDockBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.DockEntriesActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.CarDockBar" />
+
+        <service
+            android:name=".ui.DockOverlayService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="车机 Dock 悬浮栏：常驻显示空调 / 座椅 / 音乐信息快捷条" />
+        </service>
+
+        <!-- 歌词悬浮窗（融合自 LyricFloat） -->
+        <service
+            android:name=".ui.LyricOverlayService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="车机歌词悬浮窗：常驻显示当前播放歌曲的滚动歌词" />
+        </service>
+
+        <!-- 前台应用检测：判断当前哪个 App 在前台，用于「常驻显示 Dock 的应用名单」。
+             需要在「设置 → 无障碍」中手动开启（或用 adb 开启）才会生效。 -->
+        <service
+            android:name=".ui.ForegroundAppService"
+            android:enabled="true"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/foreground_accessibility_config" />
+        </service>
+
+        <service
+            android:name=".media.DockNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

@@ -1,0 +1,86 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.car.dockbar'
+    compileSdk 34
+
+    // Native 崩溃捕获需要 NDK（走 ndk-build，本机未装 CMake）
+    ndkVersion "28.2.13676358"
+
+    defaultConfig {
+        applicationId "com.car.dockbar"
+        minSdk 28
+        targetSdk 34
+        versionCode 339
+        versionName "3.13.18"
+        resConfigs "zh", "en"
+
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+        externalNativeBuild {
+            ndkBuild {
+                arguments "APP_PLATFORM=android-28"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path file('src/main/jni/Android.mk')
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // ★ v3.13.6：**开启 R8 混淆 + 资源混淆**，防止 APK 被反编译看到接口实现。
+            //   minifyEnabled    → 类名/方法名/字段名全部重命名（a/b/c…），
+            //                      反编译出来是一堆看不懂的符号，看不到业务逻辑。
+            //   shrinkResources  → 删除未引用的资源，资源表体积变小、布局文件名变短。
+            //   注意：本项目**大量使用反射**访问车机 SDK（com.ecarx.* / com.geely.os.*），
+            //   对应 keep 规则见 proguard-rules.pro，漏一条就会运行期崩。
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 车机 sideload 用 debug 签名即可，避免额外配 keystore
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    packaging {
+        resources {
+            excludes += ['META-INF/*.kotlin_module', 'DebugProbesKt.bin']
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "CarDockBar-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}

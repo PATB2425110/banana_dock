@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 来自系统 Dock（com.geely.dockbar / oneOS_Dock.apk）：ic_blowing_foot -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <group>
+        <clip-path android:pathData="M0,0h64v64h-64z" />
+        <path
+            android:fillColor="#ffffffff"
+            android:fillAlpha="0.9"
+            android:fillType="evenOdd"
+            android:pathData="M43.9996,16.4C43.9996,14.4118 45.6114,12.8 47.5996,12.8C49.5878,12.8 51.1996,14.4118 51.1996,16.4C51.1996,18.3883 49.5878,20 47.5996,20C45.6114,20 43.9996,18.3883 43.9996,16.4ZM13.5996,14.4C13.5996,14.4 17.9084,16.9043 19.632,19.4086C20.9578,21.3349 21.2637,22.6686 21.3343,23.8118H17.082L23.3408,30.4L29.5996,23.8118H24.7291C24.4023,20.3468 23.3311,18.7414 21.3555,16.9043C19.2011,14.9009 13.5996,14.4 13.5996,14.4ZM20.7822,50.4001H17.0205L25.8661,36.0863L39.5436,37.1932L45.3075,24H48.7996L41.5617,40.5669L27.5591,39.4338L20.7822,50.4001Z" />
+    </group>
+</vector>
