@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  前台应用检测（仅用于判断当前哪个 App 在前台，以决定 Dock 是否常驻显示）。
-  刻意不开 canRetrieveWindowContent：不需要读窗口内容，减少隐私面与性能开销。
+  前台应用检测。canRetrieveWindowContent 只用来读「当前最前面的窗口是哪个包」，
+  不遍历、不记录窗口里的文字。改了这项之后，用户需要在系统无障碍里重新打开一次服务。
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/accessibility_foreground_desc"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:notificationTimeout="100"
-    android:canRetrieveWindowContent="false" />
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:notificationTimeout="0"
+    android:canRetrieveWindowContent="true" />

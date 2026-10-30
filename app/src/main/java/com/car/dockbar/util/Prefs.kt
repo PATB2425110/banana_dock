@@ -25,7 +25,16 @@ object Prefs {
     fun setDockWidthPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_width_px", v).apply()
 
     /** 悬浮窗高度（px） */
-    fun dockHeightPx(ctx: Context) = sp(ctx).getInt("dock_height_px", 120)
+    fun dockHeightPx(ctx: Context): Int {
+        val s = sp(ctx)
+        if (!s.getBoolean("dock_height_default_128", false)) {
+            val cur = if (s.contains("dock_height_px")) s.getInt("dock_height_px", 128) else 128
+            val next = if (cur == 120) 128 else cur
+            s.edit().putInt("dock_height_px", next).putBoolean("dock_height_default_128", true).apply()
+            return next
+        }
+        return s.getInt("dock_height_px", 128)
+    }
     fun setDockHeightPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("dock_height_px", v).apply()
 
     /** 底部 / 顶部的偏移量（px） */
@@ -775,12 +784,10 @@ object Prefs {
         sp(ctx).edit().putString("bg_mode", m.key).apply()
     }
 
-    /**
-     * 毛玻璃失败计数（连续失败达到阈值 → 自动退回渐变，避免每次启动都试）。
-     */
-    fun blurFailCount(ctx: Context) = sp(ctx).getInt("blur_fail_count", 0)
-    fun setBlurFailCount(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt("blur_fail_count", v).apply()
+    /** 模糊半径，0 = 只半透明不模糊，24 = 最糊。只在背景形态为「模糊」时使用。 */
+    fun blurRadius(ctx: Context) = sp(ctx).getInt("blur_radius", 12).coerceIn(0, 24)
+    fun setBlurRadius(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("blur_radius", v.coerceIn(0, 24)).apply()
 
     /**
      * 纯色模式下的底色 ARGB（整条一个颜色）。

@@ -23,7 +23,9 @@ CarDockBar 日志接收服务（线上部署版，仅 Python 标准库，零依�
   GET   /download           全部日志（纯文本，按天分隔；?date=YYYY-MM-DD 只下一天）
   GET   /favicon.ico        204
 
-落盘位置：./logs/YYYY-MM-DD.jsonl（一行一条 JSON）
+落盘位置：./logs/YYYY-MM-DD.jsonl（一行一条 JSON）。这就是按天归档：
+跨天自动换新文件，同一天超过 16MB 续写 YYYY-MM-DD.1.jsonl，
+超过 LOG_KEEP_DAYS（默认 30 天）的日期文件自动删除。
 
 容量控制（车机日志特别多也不怕）：
   - App 端单条 payload 的日志正文已截断到 16000 字符，单条约 20-40KB；
@@ -119,11 +121,38 @@ def cleanup_old(force: bool = False) -> int:
     return removed
 
 
+def part_index(name: str) -> int:
+    """2026-10-29.jsonl -> 0，2026-10-29.1.jsonl -> 1。"""
+    stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+    dot = stem.find(".", 10)
+    if dot < 0:
+        return 0
+    try:
+        return int(stem[dot + 1:])
+    except ValueError:
+        return 0
+
+
+def files_for(date: str = ""):
+    """某一天的全部分片，按写入顺序（.jsonl、.1、.2）。
+
+    不带 date 时保持 day_files() 的「新日期在前」。
+    同一天的分片必须从小到大读，后面的 reverse 才能让最新记录排在前面。
+    """
+    names = [n for n in day_files() if n.endswith(".jsonl")]
+    if not date:
+        return names
+    matched = []
+    for name in names:
+        stem = name[:-len(".jsonl")]
+        if stem == date or stem.startswith(date + "."):
+            matched.append(name)
+    return sorted(matched, key=part_index)
+
+
 def load_records(date: str = "", limit: int = 0):
     """读记录，新的在前。date 为空读全部天数。"""
-    names = day_files()
-    if date:
-        names = [n for n in names if n == date + ".jsonl"]
+    names = files_for(date)
     rows = []
     for name in names:
         try:
@@ -260,9 +289,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = load_records(date, limit=200)
             return self._json(200, {"ok": True, "count": len(rows), "records": rows})
         if path == "/download":
-            names = day_files()
-            if date:
-                names = [n for n in names if n == date + ".jsonl"]
+            names = files_for(date)
             chunks = []
             for name in names:
                 chunks.append("########## %s ##########" % name)

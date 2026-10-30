@@ -160,7 +160,7 @@ class TemperaturePopup(
             text = if (isDriver) "主驾温度" else "副驾温度"
             setTextColor(DockIconView.popupFg)
             textSize = sp(15f)
-            setTypeface(null, Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -205,7 +205,7 @@ class TemperaturePopup(
                     else -> fmtTemp(value)
                 }
                 textSize = sp(16f)
-                setTypeface(null, Typeface.BOLD)
+                typeface = AppFont.bold(ctx)
                 gravity = Gravity.CENTER
                 setTextColor(DockIconView.popupFg)
             }
@@ -319,7 +319,7 @@ class TemperaturePopup(
     private fun funcBtn(text: String, onClick: () -> Unit): TextView = TextView(ctx).apply {
         this.text = text
         textSize = sp(14f)
-        setTypeface(null, Typeface.BOLD)
+        typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER
         setTextColor(DockIconView.popupFg)
         background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
@@ -333,7 +333,7 @@ class TemperaturePopup(
     private fun valueBox(label: String): TextView = TextView(ctx).apply {
         text = "$label --"
         textSize = sp(14f)
-        setTypeface(null, Typeface.BOLD)
+        typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER
         setTextColor(DockIconView.accentColor)
         background = ContextCompat.getDrawable(ctx, R.drawable.bg_field)

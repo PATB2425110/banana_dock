@@ -17,7 +17,11 @@ PORT=8080 python server.py
 | GET | `/` | 迷你查看页（30 秒自动刷新） |
 | GET | `/health` | 健康检查 |
 | GET | `/logs` | 最近 200 条记录（JSON） |
-| GET | `/download?date=YYYY-MM-DD` | 下载日志纯文本 |
+| GET | `/download?date=YYYY-MM-DD` | 下载这一天的全部日志（含 `.1.jsonl` 分片） |
+
+每天自动归档：写入时按服务器日期落到 `logs/YYYY-MM-DD.jsonl`，
+跨天换新文件；单日超过 16MB 续写 `YYYY-MM-DD.1.jsonl`；
+超过 `LOG_KEEP_DAYS`（默认 30 天）的日期文件在每天第一次写入时删掉。
 
 ## 部署
 

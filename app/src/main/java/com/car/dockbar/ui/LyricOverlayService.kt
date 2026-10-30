@@ -375,7 +375,7 @@ class LyricOverlayService : Service(), LyricMonitor.Callback {
             val t = lineViews[i]
             t.setTextSize(if (i == curSlot) size else (size - 4f).coerceAtLeast(10f))
             t.setTextColor(if (i == curSlot) hl else dim)
-            t.setTypeface(null, if (i == curSlot) Typeface.BOLD else Typeface.NORMAL)
+            t.typeface = if (i == curSlot) AppFont.bold(this) else AppFont.regular(this)
         }
 
         runCatching { wm?.updateViewLayout(v, p) }

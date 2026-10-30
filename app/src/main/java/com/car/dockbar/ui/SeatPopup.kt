@@ -97,7 +97,7 @@ class SeatPopup(private val ctx: Context) {
             text = "座椅"
             setTextColor(DockIconView.popupFg)
             textSize = sp(15f)
-            setTypeface(null, Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -226,7 +226,7 @@ class SeatPopup(private val ctx: Context) {
     private fun funcBtn(text: String): TextView = TextView(ctx).apply {
         this.text = text
         textSize = sp(14f)
-        setTypeface(null, Typeface.BOLD)
+        typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER
         setTextColor(DockIconView.popupFg)
         background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)

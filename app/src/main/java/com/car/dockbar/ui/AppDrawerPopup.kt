@@ -104,7 +104,7 @@ class AppDrawerPopup(
             text = "快捷应用"
             textSize = sp(15f)
             setTextColor(Color.WHITE)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            typeface = AppFont.bold(context)
             gravity = Gravity.CENTER_VERTICAL
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(34)

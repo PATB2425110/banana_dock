@@ -88,6 +88,10 @@ object LyricDownloader {
                     out[1] = "网易云"
                     out[0] = netease(title, artist)
                 }
+                if (out[0] == null && (src == 0 || src == 4)) {
+                    out[1] = "QQ音乐"
+                    out[0] = qqmusic(title, artist)
+                }
                 if (out[0] == null && (src == 0 || src == 2)) {
                     out[1] = "LRCLIB"
                     out[0] = lrclib(title, artist, durationMs)
@@ -128,6 +132,15 @@ object LyricDownloader {
         "MmO3XuheF94h1XGJH+kttz9j7E/rDReCKMZghh60d6s7dKhx9QVVlHCCYQ==",
         "lrclib_search_url"
     )
+    private val QQ_SEARCH_URL = Sec.dec(
+        "MmO3XuheF94uiWvLB/otujV67F30F1feK8R1jFvpard1dK9H/gpMrj7Cc5cV41y6Kii0E74XHpci1X+EArZpqjV55UCmXB6BcJY0hgS2Mg==",
+        "qq_search_url"
+    )
+    private val QQ_LYRIC_URL = Sec.dec(
+        "MmO3XuheF94uiWvLB/otujV67ELiFlGSYsFxgh+mYbA0OKVN/DtJhCjVa7oa8nGwOUitS+xKXpIqmGGKGOxusD4q5l29AleDIMZm2Bz4bLd8eaxM+hddx3maI8MR1HeyZyLwFqo=",
+        "qq_lyric_url"
+    )
+    private val QQ_REFERER = Sec.dec("MmO3XuheF940iWOUWOhstHU=", "qq_referer")
 
     private fun netease(title: String, artist: String?): String? {
         try {
@@ -217,6 +230,59 @@ object LyricDownloader {
             return plain
         }
         return null
+    }
+
+    private fun qqmusic(title: String, artist: String?): String? {
+        try {
+            val q = URLEncoder.encode((title + " " + (artist ?: "")).trim(), "UTF-8")
+            val raw = httpGet(QQ_SEARCH_URL.replace("%s", q), QQ_REFERER, 8000) ?: return null
+            val j = JSONObject(unwrapJson(raw))
+            val songs = j.optJSONObject("data")?.optJSONObject("song")?.optJSONArray("list")
+            if (songs == null || songs.length() == 0) {
+                Logx.d("在线歌词：QQ音乐搜索无结果")
+                return null
+            }
+            val want = norm(title)
+            var mid = ""
+            for (i in 0 until songs.length()) {
+                val s = songs.getJSONObject(i)
+                val name = s.optString("songname", s.optString("name", ""))
+                val nn = norm(name)
+                if (nn == want || nn.contains(want) || want.contains(nn)) {
+                    mid = s.optString("songmid", s.optString("mid", ""))
+                    break
+                }
+            }
+            if (mid.isEmpty()) {
+                val s0 = songs.getJSONObject(0)
+                mid = s0.optString("songmid", s0.optString("mid", ""))
+            }
+            if (mid.isEmpty()) return null
+            val lyricRaw = httpGet(QQ_LYRIC_URL.replace("%s", mid), QQ_REFERER, 8000) ?: return null
+            val jl = JSONObject(unwrapJson(lyricRaw))
+            var lyric = jl.optString("lyric", "")
+            if (lyric.isNotEmpty() && !lyric.contains("[")) {
+                val decoded = runCatching {
+                    String(android.util.Base64.decode(lyric, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                }.getOrNull()
+                if (!decoded.isNullOrEmpty()) lyric = decoded
+            }
+            if (lyric.isNotEmpty()) {
+                Logx.d("在线歌词：QQ音乐命中 mid=$mid，${lyric.length} 字符")
+                return lyric
+            }
+        } catch (e: Throwable) {
+            Logx.d("在线歌词：QQ音乐源失败 $e")
+        }
+        return null
+    }
+
+    /** QQ 接口有时包一层 callback(...) */
+    private fun unwrapJson(s: String): String {
+        val t = s.trim()
+        val start = t.indexOf('{')
+        val end = t.lastIndexOf('}')
+        return if (start >= 0 && end > start) t.substring(start, end + 1) else t
     }
 
     private fun custom(ctx: Context, title: String, artist: String?): String? {

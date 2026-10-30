@@ -43,6 +43,8 @@ class App : Application() {
             session.writeText("")
         }
         Logx.attachFile(session)
+        // 有网就按批把新日志送上去；断网写进 live_queue.txt，恢复后再补。
+        LogUploader.startLive(this)
 
         // ---- 自动降级：连续崩溃就逐级关闭功能，用于远程二分定位 ----
         // 上一次崩溃了且没活过 15 秒 → 连续崩溃 +1；活过 15 秒则清零。
@@ -53,14 +55,20 @@ class App : Application() {
         //   用户会觉得「装了新包连车控都没了」。
         val ver = appVersion(this)
         val versionChanged = Prefs.lastVersion(this) != ver
-        val streak = LogUploader.updateCrashStreak(this, LogUploader.lastReportHadCrash)
-        if (versionChanged) {
+        val rawStreak = LogUploader.updateCrashStreak(this, LogUploader.lastReportHadCrash)
+        // 升级 / 首次安装用重置后的 0。熔断必须看这个值，不能看重置前的计数，
+        // 否则「恢复全功能」写完，下面的熔断又会把温度监听立刻关回去。
+        val streak = if (versionChanged) {
             LogUploader.resetCrashStreak(this)
             Prefs.setSafeLevel(this, 0)
-            Prefs.setVehicleWriteEnabled(this, true)   // 新包恢复车控写入
-            Prefs.setVehicleApiEnabled(this, true)     // 新包恢复车控通道（要重新取证）
+            Prefs.setVehicleWriteEnabled(this, true)
+            Prefs.setVehicleApiEnabled(this, true)
+            Prefs.setVehicleTempWatcherEnabled(this, true)
             Prefs.setLastVersion(this, ver)
-            Logx.d("检测到版本变更 → 重置降级阶梯，恢复全功能")
+            Logx.d("检测到版本变更 → 重置降级阶梯，恢复全功能（含温度事件监听）")
+            0
+        } else {
+            rawStreak
         }
         // ★ 封顶 L3，不再有 L4。
         //   旧版 streak>=5 会升到 L4「连车控都不初始化，只剩纯 UI」——用户在 CX11 上
@@ -101,14 +109,7 @@ class App : Application() {
             }
         }
 
-        // ★ v3.13.16：**毛玻璃崩溃回退** —— 毛玻璃走 PixelCopy 抓屏（公开 API，
-        //   但仍属实验特性）。只要上次会话崩过且当时开着毛玻璃，
-        //   这次启动就自动退回「渐变」，避免反复崩溃。
-        //   （与上面 watcher / 写入的熔断阶梯同一套机制）
-        if (streak >= 1 && Prefs.bgMode(this) == com.car.dockbar.ui.BgMode.BLUR) {
-            Prefs.setBgMode(this, com.car.dockbar.ui.BgMode.GRADIENT)
-            Logx.w("⚠ 上次会话崩溃过 → 已自动把背景形态退回「渐变」（毛玻璃是实验特性）")
-        }
+        // ★ 连续崩溃不再因为「开过模糊」退回渐变。模糊不再抓屏。
 
         // ★★ v1.4.51 二分熔断：关掉 watcher / 写入 / 温度通道之后 CX11 仍在闪退，
         //    说明还有别的 abort 源。这里按「先摘最可疑的、再摘次可疑的」逐级断电，
@@ -143,6 +144,7 @@ class App : Application() {
         Logx.d(
             "二分开关：车控通道=${if (Prefs.vehicleApiEnabled(this)) "开" else "★关（不碰厂商 API）"}" +
                     "　事件监听=${if (Prefs.vehicleWatcherEnabled(this)) "开" else "关"}" +
+                    "　温度监听=${if (Prefs.vehicleTempWatcherEnabled(this)) "开" else "关"}" +
                     "　车控写入=${if (Prefs.vehicleWriteEnabled(this)) "开" else "关"}"
         )
 

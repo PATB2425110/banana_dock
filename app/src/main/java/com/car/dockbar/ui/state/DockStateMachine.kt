@@ -64,6 +64,10 @@ class DockStateMachine(
      */
     private val hideRunnable = Runnable { onTempShowTimeout() }
     private var hideAtMs: Long = 0L
+    /** 这次临时显示要用的时长。倒计时不在唤起时启动，等 [onUserIdle]。 */
+    private var tempDurationMs: Long = 0L
+    /** 手指先松开、淡入还没结束：等进入 TEMP_SHOW 再开始计时。 */
+    private var armTimerOnShown: Boolean = false
 
     // ------------------------------------------------------------------
     // 对外事件
@@ -72,6 +76,10 @@ class DockStateMachine(
     /** 立即显示（如开机、权限刚授予、主界面开关打开） */
     fun requestShowImmediate() {
         if (state == DockState.SHOWN) return
+        tempDurationMs = 0L
+        armTimerOnShown = false
+        main.removeCallbacks(hideRunnable)
+        hideAtMs = 0L
         val from = state
         state = DockState.SHOWING
         cb.onShowStart(from)
@@ -81,16 +89,18 @@ class DockStateMachine(
      * 临时显示并倒计时自动消失（空调/音量等状态提示，对齐吉利的 autoDisMissTime）。
      */
     fun requestTempShow(delayMs: Long) {
+        tempDurationMs = delayMs
+        pauseAutoHide()
         val from = state
-        if (state == DockState.SHOWN) {
-            // 已显示：只切到 TEMP_SHOW，不重播动画
+        if (state == DockState.SHOWN || state == DockState.TEMP_SHOW || state == DockState.DRAG_SHOW) {
+            // 已显示：只切到 TEMP_SHOW，不重播动画，也不在这一刻开始倒计时
             state = DockState.TEMP_SHOW
-            scheduleTempHide(delayMs)
+            if (delayMs == 0L) scheduleTempHide(0L)
             return
         }
         state = DockState.SHOWING
         cb.onShowStart(from)
-        // 动画结束后再进入 TEMP_SHOW
+        // 动画结束后再进入 TEMP_SHOW。倒计时等手指离开。
         pendingTempDelayMs = delayMs
     }
 
@@ -108,6 +118,10 @@ class DockStateMachine(
 
     /** 隐藏（手动关闭 / 自动 / 服务销毁） */
     fun requestHide(reason: HideReason = HideReason.MANUAL) {
+        tempDurationMs = 0L
+        armTimerOnShown = false
+        main.removeCallbacks(hideRunnable)
+        hideAtMs = 0L
         if (state == DockState.HIDDEN) {
             cb.onHidden()
             return
@@ -117,15 +131,29 @@ class DockStateMachine(
         cb.onHideStart(reason)
     }
 
+    /** 手指按在 Dock 上或弹窗还开着：停掉倒计时。 */
+    fun pauseAutoHide() {
+        armTimerOnShown = false
+        main.removeCallbacks(hideRunnable)
+        hideAtMs = 0L
+    }
+
     /**
-     * 用户与 Dock 交互了（点击图标、拖拽、调空调）。
-     * 临时显示态会刷新倒计时；空闲自动隐藏开启时也会顺延。
+     * 没有在操作 Dock 了，从这一刻起按本次临时显示的时长计时。
+     * 唤起本身不算开始，松手、弹窗收起才算。
      */
-    fun onUserInteraction() {
-        // ★ v1.4.73：只有「临时显示」态才刷新倒计时（常驻态永不自动消失）
-        if (state == DockState.TEMP_SHOW && hideAtMs > 0L) {
-            scheduleTempHide(hideAtMs - System.currentTimeMillis())
+    fun onUserIdle() {
+        if (tempDurationMs <= 0L) return
+        when (state) {
+            DockState.TEMP_SHOW -> scheduleTempHide(tempDurationMs)
+            DockState.SHOWING -> armTimerOnShown = true
+            else -> {}
         }
+    }
+
+    /** 一次操作结束（点击抬手）。正在按住时由 [pauseAutoHide] 停表，这里重新开始。 */
+    fun onUserInteraction() {
+        onUserIdle()
     }
 
     // ------------------------------------------------------------------
@@ -135,14 +163,14 @@ class DockStateMachine(
     fun onShowAnimEnd() {
         when (state) {
             DockState.SHOWING -> {
-                state = if (pendingTempDelayMs > 0L) {
-                    val d = pendingTempDelayMs
-                    pendingTempDelayMs = 0L
-                    DockState.TEMP_SHOW.also { scheduleTempHide(d) }
-                } else {
-                    DockState.SHOWN
-                }
+                val temp = pendingTempDelayMs > 0L
+                pendingTempDelayMs = 0L
+                state = if (temp) DockState.TEMP_SHOW else DockState.SHOWN
                 cb.onShown()
+                if (temp && armTimerOnShown) {
+                    armTimerOnShown = false
+                    scheduleTempHide(tempDurationMs)
+                }
             }
             DockState.HIDING -> { /* 用户中途又点了显示，交给外层处理 */ }
             else -> {}
@@ -164,8 +192,8 @@ class DockStateMachine(
      */
     fun applyHiddenByApp(on: Boolean) {
         if (hiddenByApp == on) {
-            // 状态没变也要保证一致性（首次进入时 hiddenByApp 已是 false）
-            if (on && state != DockState.HIDDEN && state != DockState.HIDING) {
+            // 临时显示期间不要被重复的前台事件立刻收掉，等倒计时结束。
+            if (on && state == DockState.SHOWN) {
                 requestHide(HideReason.AUTO)
             }
             return
@@ -201,10 +229,14 @@ class DockStateMachine(
 
     private fun onTempShowTimeout() {
         hideAtMs = 0L
-        if (hiddenByApp) return
-        if (state == DockState.TEMP_SHOW) {
+        if (state != DockState.TEMP_SHOW) return
+        tempDurationMs = 0L
+        armTimerOnShown = false
+        if (hiddenByApp) {
             state = DockState.HIDING
             cb.onHideStart(HideReason.AUTO)
+        } else {
+            state = DockState.SHOWN
         }
     }
 

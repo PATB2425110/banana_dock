@@ -113,7 +113,7 @@ class AirDirectionPopup(private val ctx: Context) {
             text = "风向"
             setTextColor(DockIconView.popupFg)
             textSize = sp(16f)
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -217,7 +217,7 @@ class AirDirectionPopup(private val ctx: Context) {
             this.text = text
             setTextColor(DockIconView.popupFg)
             textSize = sp(sizeSp)
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             gravity = Gravity.CENTER
             background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
             minHeight = dp(48)

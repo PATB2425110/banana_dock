@@ -1,7 +1,10 @@
 package com.car.dockbar.util
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import com.car.dockbar.ui.DockOverlayService
 import org.json.JSONObject
@@ -22,14 +25,17 @@ import java.util.concurrent.TimeUnit
  * 设计目标：**车机在用户手里、人不在车边、没有 adb**，所以让 App 自己把日志 POST 到
  * 一个可被我方读取的 HTTPS 收集端点，之后直接拉取分析。
  *
- * 上传时机（四种）：
- *  1. `crash`        —— Java 未捕获异常，崩溃瞬间同步上传（含堆栈 + 日志尾部）
- *  2. `prev_session` —— 下次启动时补传「上次会话」的落盘日志。
+ * 上传时机：
+ *  1. `live`         —— 有网时实时上传。日志先攒一批（约 1.5 秒，或满 40 行），
+ *                       再 POST 一条。没网或 POST 失败就落进 live_queue.txt，
+ *                       网络恢复或下次启动再补，不靠手动按钮。
+ *  2. `crash`        —— Java 未捕获异常，崩溃瞬间同步上传（含堆栈 + 日志尾部）
+ *  3. `prev_session` —— 下次启动时补传「上次会话」的落盘日志。
  *                       ⚠️ 这是覆盖 **native 崩溃** 的关键：native 崩溃不会触发
  *                       Thread.setDefaultUncaughtExceptionHandler，只能靠"上次日志"回捞。
- *  3. `diag`         —— 车控初始化完成后上传一条诊断记录（后端类型、读写方法签名、
+ *  4. `diag`         —— 车控初始化完成后上传一条诊断记录（后端类型、读写方法签名、
  *                       温度通道、首帧各通道原始值），用于远程确认车控是否真的通了。
- *  4. `manual`       —— 主界面「立即上传日志」按钮。
+ *  5. `manual`       —— 主界面「立即上传日志」按钮（实时上传之外的手动快照）。
  *
  * 可靠性：
  *  - 上传走单线程池，绝不阻塞主线程；
@@ -367,8 +373,10 @@ object LogUploader {
         val clean = cleanExitMarker(ctx).exists()
         cleanExitMarker(ctx).delete()
 
-        // 「上次异常结束」= 有崩溃堆栈，或没有正常关闭标记
-        lastReportHadCrash = hasJava || hasNative || !clean
+        // 首次安装没有上次会话，clean_exit 本来就不存在，不能当成闪退。
+        // 否则默认开启的温度监听会在用户打开设置前就被熔断关掉。
+        val noPreviousSession = !hasJava && !hasNative && !hasAbort && logText.isBlank()
+        lastReportHadCrash = !noPreviousSession && (hasJava || hasNative || !clean)
 
         if (!Prefs.logUploadEnabled(ctx)) return "日志上传未启用"
         if (!hasJava && !hasNative && !hasAbort && logText.isBlank()) {
@@ -503,6 +511,200 @@ object LogUploader {
         val hasFile = (javaCrashFile(ctx).exists() && javaCrashFile(ctx).length() > 0) ||
                 (nativeCrashFile(ctx).exists() && nativeCrashFile(ctx).length() > 0)
         return hasFile && !marker.startsWith(fp)
+    }
+
+    // ---------------- 在线实时上传 ----------------
+
+    /** 攒批间隔：这段时间内的新行合成一条 POST */
+    private const val LIVE_FLUSH_MS = 1500L
+    /** 行数或字数先到就立刻发，避免连点时在缓冲里多等 */
+    private const val LIVE_FLUSH_LINES = 40
+    private const val LIVE_FLUSH_CHARS = 8000
+    /** 离线队列上限。超出只留后半段，和 session.log 同一量级 */
+    private const val LIVE_SPILL_MAX = 512 * 1024
+
+    private val liveLock = Object()
+    private val liveLines = ArrayDeque<String>()
+    @Volatile private var liveCtx: Context? = null
+    @Volatile private var netUp = true
+    @Volatile private var liveStarted = false
+
+    private val liveLineListener: (String) -> Unit = { line ->
+        // 上传结果自己打的日志不再送一遍，否则失败重试会自己喂自己
+        if (!line.contains("日志上传")) {
+            synchronized(liveLock) {
+                liveLines.addLast(line)
+                liveLock.notifyAll()
+            }
+        }
+    }
+
+    /**
+     * 开始把 [Logx] 的新行在有网时分批送出。
+     * 在 [Logx.attachFile] 之后调用一次。重复调用无效果。
+     */
+    fun startLive(ctx: Context) {
+        if (liveStarted) return
+        liveStarted = true
+        val app = ctx.applicationContext
+        liveCtx = app
+        Logx.addListener(liveLineListener)
+        watchNetwork(app)
+        Thread({ liveLoop() }, "log-live").apply { isDaemon = true }.start()
+    }
+
+    private fun watchNetwork(ctx: Context) {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    netUp = true
+                    synchronized(liveLock) { liveLock.notifyAll() }
+                }
+
+                override fun onLost(network: Network) {
+                    netUp = false
+                }
+            })
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun networkOnline(ctx: Context): Boolean {
+        if (!netUp) return false
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val info = cm.activeNetworkInfo
+        return info != null && info.isConnected
+    }
+
+    private fun liveLoop() {
+        var backoff = LIVE_FLUSH_MS
+        while (true) {
+            try {
+                val ctx = liveCtx
+                if (ctx == null) {
+                    SystemClock.sleep(500)
+                    continue
+                }
+                if (!isEnabled(ctx) || endpoint(ctx).isBlank()) {
+                    synchronized(liveLock) { liveLines.clear() }
+                    spillFile(ctx).delete()
+                    SystemClock.sleep(2000)
+                    continue
+                }
+                if (spillFile(ctx).let { it.exists() && it.length() > 0L }) {
+                    val chunk = takeSpill(ctx)
+                    if (chunk.isNotEmpty()) {
+                        if (!canSend(ctx) || !postLive(ctx, chunk, "离线补传")) {
+                            restoreSpillFront(ctx, chunk)
+                            SystemClock.sleep(backoff)
+                            backoff = (backoff * 2).coerceAtMost(60_000L)
+                        } else {
+                            backoff = LIVE_FLUSH_MS
+                        }
+                        continue
+                    }
+                }
+                val batch = awaitBatch()
+                if (batch.isEmpty()) continue
+                if (!canSend(ctx) || !postLive(ctx, batch, "在线实时")) {
+                    spill(ctx, batch)
+                    SystemClock.sleep(backoff)
+                    backoff = (backoff * 2).coerceAtMost(60_000L)
+                } else {
+                    backoff = LIVE_FLUSH_MS
+                }
+            } catch (t: Throwable) {
+                android.util.Log.d("CarDockBar", "实时上传异常 ${t.javaClass.simpleName}: ${t.message}")
+                SystemClock.sleep(backoff)
+                backoff = (backoff * 2).coerceAtMost(60_000L)
+            }
+        }
+    }
+
+    private fun canSend(ctx: Context): Boolean =
+        isEnabled(ctx) && endpoint(ctx).isNotBlank() && networkOnline(ctx)
+
+    /** 成功不写 Logx，避免「日志上传」那一行再触发一轮发送 */
+    private fun postLive(ctx: Context, lines: List<String>, note: String): Boolean {
+        val body = lines.joinToString("\n")
+        if (body.isBlank()) return true
+        val ok = post(endpoint(ctx), buildPayload(ctx, "live", body, note))
+        lastResult = if (ok) "实时已上传 ${lines.size} 行" else "实时上传失败，已暂存待补传"
+        return ok
+    }
+
+    /** 等到有日志，再最多等 [LIVE_FLUSH_MS] 把紧挨着的几行合成一批 */
+    private fun awaitBatch(): List<String> {
+        synchronized(liveLock) {
+            while (liveLines.isEmpty()) {
+                liveLock.wait(30_000)
+            }
+            val deadline = SystemClock.elapsedRealtime() + LIVE_FLUSH_MS
+            while (liveLines.size < LIVE_FLUSH_LINES && SystemClock.elapsedRealtime() < deadline) {
+                val left = deadline - SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                liveLock.wait(left)
+            }
+            val out = ArrayList<String>(LIVE_FLUSH_LINES)
+            var chars = 0
+            while (liveLines.isNotEmpty() && out.size < LIVE_FLUSH_LINES && chars < LIVE_FLUSH_CHARS) {
+                val line = liveLines.removeFirst()
+                out.add(line)
+                chars += line.length + 1
+            }
+            return out
+        }
+    }
+
+    private fun spillFile(ctx: Context): File = File(logDir(ctx), "live_queue.txt")
+
+    private fun spill(ctx: Context, lines: List<String>) {
+        if (lines.isEmpty()) return
+        val f = spillFile(ctx)
+        f.appendText(lines.joinToString("\n", postfix = "\n"))
+        if (f.length() > LIVE_SPILL_MAX) {
+            val keep = f.readText().takeLast(LIVE_SPILL_MAX / 2)
+            val cut = keep.indexOf('\n')
+            f.writeText(if (cut >= 0) keep.substring(cut + 1) else keep)
+        }
+    }
+
+    /** 从离线队列头部取出一批，文件里留下剩余部分 */
+    private fun takeSpill(ctx: Context): List<String> {
+        val f = spillFile(ctx)
+        if (!f.exists() || f.length() == 0L) return emptyList()
+        val lines = f.readText().lineSequence().filter { it.isNotEmpty() }.toList()
+        if (lines.isEmpty()) {
+            f.delete()
+            return emptyList()
+        }
+        val take = ArrayList<String>(LIVE_FLUSH_LINES)
+        var chars = 0
+        var idx = 0
+        while (idx < lines.size && take.size < LIVE_FLUSH_LINES && chars < LIVE_FLUSH_CHARS) {
+            val line = lines[idx]
+            if (take.isNotEmpty() && chars + line.length > LIVE_FLUSH_CHARS) break
+            take.add(line)
+            chars += line.length + 1
+            idx++
+        }
+        val rest = lines.drop(idx)
+        if (rest.isEmpty()) f.delete() else f.writeText(rest.joinToString("\n", postfix = "\n"))
+        return take
+    }
+
+    private fun restoreSpillFront(ctx: Context, lines: List<String>) {
+        if (lines.isEmpty()) return
+        val f = spillFile(ctx)
+        val rest = if (f.exists()) f.readText() else ""
+        f.writeText(lines.joinToString("\n", postfix = "\n") + rest)
+        if (f.length() > LIVE_SPILL_MAX) {
+            val keep = f.readText().takeLast(LIVE_SPILL_MAX / 2)
+            val cut = keep.indexOf('\n')
+            f.writeText(if (cut >= 0) keep.substring(cut + 1) else keep)
+        }
     }
 
     // ---------------- 失败重试队列 ----------------

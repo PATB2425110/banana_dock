@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.app.WallpaperManager
 import android.os.Build
 import android.os.Handler
@@ -105,6 +106,9 @@ class DockOverlayService : Service() {
 
     private lateinit var wm: WindowManager
     private var root: DockLayout? = null
+    /** 纯色模式下，系统桌面前台时底色已切成透明。 */
+    private var solidHomeClear: Boolean? = null
+    private var homePkg: String? = null
     private var params: WindowManager.LayoutParams? = null
     /** View 当前是否已 addView 到 WindowManager */
     private var viewAttached = false
@@ -466,6 +470,9 @@ class DockOverlayService : Service() {
             showSeparators = Prefs.showSeparators(ctx)
             separatorColor = if (darkText) 0x33FFFFFF else 0x33000000
             DockIconView.accentColor = Prefs.accentColor(ctx)
+            onPressChanged = { down ->
+                if (down) stateMachine?.pauseAutoHide() else stateMachine?.onUserIdle()
+            }
         }
         // 背景：渐变优先；未启用渐变则用纯色（可跟随日夜模式）
         applyBackground(layout)
@@ -605,9 +612,14 @@ class DockOverlayService : Service() {
         main.postDelayed({ if (!attached) attachGestureStrip() }, 800)
     }
 
-    /** 用户点了 Dock 上的任何东西：顺延自动隐藏倒计时 */
+    /** 一次操作结束（点击抬手）：从现在开始按设定时长计时 */
     private fun onUserInteraction() {
-        stateMachine?.onUserInteraction()
+        stateMachine?.onUserIdle()
+    }
+
+    /** 弹窗还开着，或手指按住：先停表 */
+    private fun pauseAutoHide() {
+        stateMachine?.pauseAutoHide()
     }
 
     /**
@@ -627,18 +639,48 @@ class DockOverlayService : Service() {
         }
         hiddenByApp = hide
         stateMachine?.applyHiddenByApp(hide)
-        // ★ v3.13.16：毛玻璃 —— 前台应用变了，背景内容也变了。
-        //   只在 Dock **不可见**时抓（画面里没有 Dock 自己 → 无自指、无闪烁）；
-        //   Dock 可见时留到下一次淡入前再抓。
-        if (Prefs.bgMode(this) == BgMode.BLUR && (root?.alpha ?: 1f) <= 0.01f) {
-            requestBlurCapture()
-        }
+        syncSolidWithForeground()
     }
 
     /** 开始监听前台应用变化（由 ForegroundAppService 无障碍服务写入） */
     private fun attachForegroundTracking() {
         ForegroundTracker.listener = { _ -> applyKeepShownForForeground() }
         applyKeepShownForForeground()
+    }
+
+    /** 系统桌面包名：默认 HOME，再加上这台车的 launcher3。 */
+    private fun systemHomePackage(): String? {
+        homePkg?.let { return it }
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val pkg = packageManager.resolveActivity(
+            intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+        )?.activityInfo?.packageName
+        if (!pkg.isNullOrBlank() && pkg != "android") homePkg = pkg
+        return homePkg
+    }
+
+    private fun onSystemHome(): Boolean {
+        val pkg = ForegroundTracker.currentPackage ?: return false
+        if (pkg == "com.android.launcher3") return true
+        return pkg == systemHomePackage()
+    }
+
+    /**
+     * 纯色模式下，只有系统桌面在前台时把底色改成透明。
+     * 其它应用在前台、或还没识别到前台时，保持纯色。
+     */
+    private fun syncSolidWithForeground() {
+        if (Prefs.bgMode(this) != BgMode.SOLID) {
+            solidHomeClear = null
+            return
+        }
+        val clear = onSystemHome()
+        if (solidHomeClear == clear) return
+        solidHomeClear = clear
+        val layout = root ?: return
+        applyBackground(layout)
+        applyContrast(this)
+        Logx.d(if (clear) "纯色：系统桌面前台 → 底色透明" else "纯色：离开桌面 → 恢复纯色")
     }
 
     private fun slideOffset(): Float {
@@ -665,9 +707,6 @@ class DockOverlayService : Service() {
         animating = true
         v.translationY = slideOffset()
         v.alpha = 0f
-        // ★ v3.13.16：淡入**之前**抓一张干净的模糊底图 ——
-        //   此刻 Dock 的 alpha = 0（不参与合成）→ 抓到的画面里没有 Dock 自己。
-        requestBlurCapture()
         v.animate()
             .alpha(1f)
             .translationY(0f)
@@ -740,75 +779,70 @@ class DockOverlayService : Service() {
     //   所以只在 **Dock 隐藏时**才挂载，且高度尽量小（默认 64px）。
     //
 
-    /**
-     * 上滑手势只认「屏幕最底部这么宽的一条边」，条内其它区域一律放行透传。
-     *
-     * ★ v3.3.1：必须 `by lazy` —— Service 的**构造函数**跑在 attachBaseContext() 之前，
-     *   那时 ContextWrapper.mBase 还是 null，直接读 `resources` 会 NPE 导致服务创建失败、必崩。
-     *   （adb 崩溃堆栈实证：`DockOverlayService.<init>(DockOverlayService.kt:732)`）
-     *   lazy 到第一次访问（attachGestureStrip，onCreate 之后）才求值，那时 base context 已就绪。
-     */
-    private val gestureEdgePx: Int by lazy { (10 * resources.displayMetrics.density).toInt() }
-
     /** 挂载手势条（Dock 隐藏时） */
     private fun attachGestureStrip() {
         if (gestureAttached) return
         if (!Prefs.swipeShowDockEnabled(this)) return
         val h = Prefs.swipeShowDockStripPx(this).coerceAtLeast(24)
-        val v = View(this)
+        val density = resources.displayMetrics.density
+        val pillH = (12 * density).toInt().coerceAtLeast(8)
+        // 96dp 的基础上连续加宽两次 1.5 倍
+        val pillW = (216 * density).toInt()
+        // 底部偏移：先上移 30px，再下移 10px，再下移 5px
+        val yOff = (6 * density).toInt() + 15
+        val v = View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(0x99FFFFFF.toInt())
+                setStroke((density).toInt().coerceAtLeast(1), android.graphics.Color.BLACK)
+                cornerRadius = pillH / 2f
+            }
+        }
         v.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     gestureDownX = ev.rawX
                     gestureDownY = ev.rawY
-                    // ★ v3.3：**只有落在最底部 gestureEdgePx 内的按下才当作手势候选**。
-                    //   之前的实现对所有 DOWN 都 return true → 整条（默认 64px）
-                    //   区域的点击全被吞掉，Dock 隐藏时车机上那一条点不动。
-                    //   非候选直接 return false：FLAG_NOT_TOUCH_MODAL 下不消费就会透传给下面的应用。
-                    gestureTracking = (resources.displayMetrics.heightPixels - ev.rawY) <= gestureEdgePx
-                    gestureTracking
+                    gestureTracking = true
+                    true
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     if (!gestureTracking) return@setOnTouchListener false
-                    val dy = gestureDownY - ev.rawY          // 向上滑为正
+                    val dy = gestureDownY - ev.rawY
                     val dx = ev.rawX - gestureDownX
-                    // 上滑超过阈值（且明显是竖直方向）→ 唤出 Dock
                     if (dy > h * 1.2f && dy > Math.abs(dx) * 1.5f) {
                         gestureTracking = false
                         Logx.d("底部上滑手势 → 临时显示 Dock ${Prefs.swipeShowDockMs(this)}ms")
                         stateMachine?.requestTempShow(Prefs.swipeShowDockMs(this))
                         true
                     } else {
-                        true        // 手势还没判定完，继续吞着等 MOVE
+                        true
                     }
                 }
                 android.view.MotionEvent.ACTION_UP,
                 android.view.MotionEvent.ACTION_CANCEL -> {
                     gestureTracking = false
-                    // 抬手也放行：没触发上滑就当成普通点击，让下面的应用收到
-                    false
+                    // 唤起手势结束才开始倒计时，不从划过门槛的那一下算
+                    stateMachine?.onUserIdle()
+                    true
                 }
                 else -> false
             }
         }
         val p = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            h,
+            pillW,
+            pillH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // ★ v1.4.97 #6：补上 FLAG_NOT_TOUCH_MODAL（原来漏了）→ **透传**。
-            //   没有这个 flag 时该窗口是「模态」的：整屏的触摸都会被它吞掉，
-            //   表现为 Dock 自动隐藏后车机上的点击大面积失灵。
-            //   加上之后只有手势条那一条区域自己接收触摸，条外的点击照常透给下面的应用。
+            // 窗口只有横条这么大。NOT_TOUCH_MODAL 让横条以外的触摸落到下面的应用。
+            // 点在横条上的那一下要消费掉，手指滑出横条后 MOVE 才会继续送到这里。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             x = 0
-            y = 0
+            y = yOff
         }
         gestureView = v
         runCatching { wm.addView(v, p) }
@@ -911,6 +945,7 @@ class DockOverlayService : Service() {
         // Dock 若处于隐藏态（开了空闲自动隐藏），弹窗期间顺带临时显示一下
         if (stateMachine?.state == DockState.HIDDEN) {
             stateMachine?.requestTempShow(delay)
+            stateMachine?.onUserIdle()
         }
     }
 
@@ -948,13 +983,14 @@ class DockOverlayService : Service() {
     }
 
     private fun showHvacPopup(anchor: View? = null) {
-        onUserInteraction()
+        pauseAutoHide()
         val pop = hvacPop ?: HvacControlPopup(this).also { p ->
             p.onDismissed = {
                 // 控制面板收起后，若 Dock 仍应隐藏则交还给状态机
                 if (stateMachine?.state == DockState.HIDDEN) {
                     stateMachine?.requestTempShow(0)
                 }
+                stateMachine?.onUserIdle()
             }
             hvacPop = p
         }
@@ -972,8 +1008,11 @@ class DockOverlayService : Service() {
      * @param anchor 触发弹窗的「风向」图标，弹窗位置贴着它
      */
     private fun showAirDirectionPopup(anchor: View? = null) {
-        onUserInteraction()
-        val pop = airDirPop ?: AirDirectionPopup(this).also { airDirPop = it }
+        pauseAutoHide()
+        val pop = airDirPop ?: AirDirectionPopup(this).also {
+            it.onDismissed = { stateMachine?.onUserIdle() }
+            airDirPop = it
+        }
         // ★ toggle：开着就关（快速连点不会「出不来」）
         // ★★ v1.4.67：被「点外面」关掉后的同一手势收尾不再重弹
         if (pop.isShowing) pop.hide() else if (!DockPopupChrome.shouldSuppressShow()) pop.show(anchor)
@@ -988,9 +1027,12 @@ class DockOverlayService : Service() {
      * 位置贴着触发图标、点外面关闭、无 × 按钮（统一规范见 [DockPopupChrome]）。
      */
     private fun showAppDrawer(anchor: View? = null) {
-        onUserInteraction()
-        val pop = appDrawerPop ?: AppDrawerPopup(this) { onUserInteraction() }
-            .also { appDrawerPop = it }
+        pauseAutoHide()
+        val pop = appDrawerPop ?: AppDrawerPopup(this) { pauseAutoHide() }
+            .also {
+                it.onDismissed = { stateMachine?.onUserIdle() }
+                appDrawerPop = it
+            }
         // ★ toggle：开着就关（快速连点不会「出不来」）
         // ★★ v1.4.67：被「点外面」关掉后的同一手势收尾不再重弹
         if (pop.isShowing) pop.dismiss() else if (!DockPopupChrome.shouldSuppressShow()) pop.show(anchor)
@@ -1018,14 +1060,17 @@ class DockOverlayService : Service() {
      * 不再进系统空调页面。位置贴着触发图标、点外面关闭、无 × 按钮（统一规范）。
      */
     private fun showAirQualityPopup(anchor: View? = null, isDriver: Boolean = true) {
-        onUserInteraction()
+        pauseAutoHide()
         val zone = if (isDriver) TemperaturePopup.ZONE_DRIVER else TemperaturePopup.ZONE_PASSENGER
         val existing = airQualityPop
         if (existing != null && existing.zone != zone) {
             existing.destroy()
             airQualityPop = null
         }
-        val pop = airQualityPop ?: TemperaturePopup(this, zone).also { airQualityPop = it }
+        val pop = airQualityPop ?: TemperaturePopup(this, zone).also {
+            it.onDismissed = { stateMachine?.onUserIdle() }
+            airQualityPop = it
+        }
         // ★ toggle：开着就关（快速连点不会「出不来」）
         // ★★ v1.4.67：被「点外面」关掉后的同一手势收尾不再重弹
         //   （否则 = 点图标 → 弹窗 outside 关闭 → 同一手势 up 又把它弹回来 → 关不掉）
@@ -1047,8 +1092,11 @@ class DockOverlayService : Service() {
      * 不再进座椅设置 App。位置贴着触发图标、点外面关闭、无 × 按钮（统一规范）。
      */
     private fun showSeatPopup(anchor: View? = null) {
-        onUserInteraction()
-        val pop = seatPopup ?: SeatPopup(this).also { seatPopup = it }
+        pauseAutoHide()
+        val pop = seatPopup ?: SeatPopup(this).also {
+            it.onDismissed = { stateMachine?.onUserIdle() }
+            seatPopup = it
+        }
         // ★ toggle：开着就关（快速连点不会「出不来」）
         // ★★ v1.4.67：被「点外面」关掉后的同一手势收尾不再重弹
         if (pop.isShowing) pop.hide() else if (!DockPopupChrome.shouldSuppressShow()) pop.show(anchor)
@@ -1118,166 +1166,37 @@ class DockOverlayService : Service() {
         // ★ v3.13.16：**背景形态四选一互斥**（纯色 / 透明 / 渐变 / 毛玻璃）
         when (Prefs.bgMode(this)) {
             BgMode.SOLID -> {
+                BehindBlur.clear(layout)
                 layout.bgColors = null
-                layout.bgColor = Prefs.solidBgColor(this)
+                layout.bgColor = if (onSystemHome()) 0 else Prefs.solidBgColor(this)
                 layout.blurBitmap = null
             }
             BgMode.TRANSPARENT -> {
+                BehindBlur.clear(layout)
                 layout.bgColors = null
                 layout.bgColor = 0
                 layout.blurBitmap = null
             }
             BgMode.GRADIENT -> {
+                BehindBlur.clear(layout)
                 layout.bgColors = Prefs.currentGradientColors(this)
                 layout.gradientAngle = 0
                 layout.bgColor = 0
                 layout.blurBitmap = null
             }
             BgMode.BLUR -> {
-                // 毛玻璃：模糊图当底 + 半透明色调层（保留日夜色调控制）
                 layout.bgColors = null
-                layout.bgColor = blurTintColor()
-                layout.blurBitmap = blurBmp
+                layout.bgColor = 0
+                layout.blurBitmap = null
+                val night = Prefs.bgFollowNight(this) && Prefs.isNightMode(this)
+                val tint = if (night) 0x33000000 else 0x33FFFFFF
+                BehindBlur.apply(
+                    layout,
+                    Prefs.blurRadius(this) * 4,
+                    Prefs.cornerRadiusPx(this).toFloat(),
+                    tint
+                )
             }
-        }
-    }
-
-    /**
-     * ★ v3.13.16：毛玻璃上的**色调层**颜色（固定值）。
-     * 白天淡白 / 夜间淡黑，浓度很低 —— 只给玻璃一点色调整体感，不遮模糊。
-     * ★ 不再跟随「底色透明度」滑杆：那两个滑杆只属于纯色 / 渐变形态，
-     *   切到毛玻璃时设置页会把它们隐藏。
-     */
-    private fun blurTintColor(): Int {
-        val night = Prefs.bgFollowNight(this) && Prefs.isNightMode(this)
-        return if (night) 0x14000000 else 0x1AFFFFFF
-    }
-
-    // =====================================================================
-    // ★ v3.13.16：毛玻璃（PixelCopy 抓屏 + 降采样模糊）
-    // =====================================================================
-
-    /** 当前模糊底图（null = 还没抓到 / 抓取失败） */
-    private var blurBmp: android.graphics.Bitmap? = null
-
-    /** 连续失败次数（≥3 自动退回渐变） */
-    private var blurFailCount = 0
-
-    /**
-     * 抓取 Dock 所在屏幕区域 → 降采样模糊 → 作为毛玻璃底图。
-     *
-     * ⚠ **自指规避**：抓 Display 会把 Dock 自己也抓进去（自己糊自己）。
-     *   调用时机保证 Dock 此刻 **alpha=0 或不可见**（淡入之前 / 隐藏时），
-     *   这样抓到的画面里没有 Dock。
-     *
-     * ⚠ **为什么用反射调 `android.graphics.PixelCopy`**：
-     *   Android 9（API 28）公开 SDK 里只有 `android.view.PixelCopy`，
-     *   而它的重载只有 SurfaceView / Surface / Window —— **没有 Display**，
-     *   抓不到屏幕合成结果（抓自己的 Window 只能拿到 Dock 自己画的半透明底色）。
-     *   真正能抓整屏的是 `android.graphics.PixelCopy.request(Display, Rect, Bitmap, listener, handler)`
-     *   —— 它是 @hide 实现，**API 24~29 存在（API 31 移除）**，只能反射调用。
-     *   任何一步失败都走 onBlurFailed → 连续 3 次失败自动退回「渐变」。
-     *
-     * ⚠ 与「反射 SurfaceControl.screenshot()」的区别：那个是隐藏 API，
-     *   在本 ROM 上永远失败并触发厂商 libgui 的 abort → 必崩；
-     *   PixelCopy 是标准 Binder 调用，失败只回调错误码，不会崩。
-     */
-    private fun requestBlurCapture() {
-        if (Prefs.bgMode(this) != BgMode.BLUR) return
-        val display = wm?.defaultDisplay ?: return
-        val p = params ?: return
-        val w = if (p.width > 0) p.width else resources.displayMetrics.widthPixels
-        val h = p.height
-        if (w <= 0 || h <= 0) return
-        val rect = android.graphics.Rect(p.x, p.y, p.x + w, p.y + h)
-        val dest = try {
-            android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-        } catch (t: Throwable) {
-            onBlurFailed("无法分配 ${w}×$h 位图：${t.message}")
-            return
-        }
-        try {
-            val cls = Class.forName("android.graphics.PixelCopy")
-            val iface = Class.forName("android.graphics.PixelCopy\$OnPixelCopyFinishedListener")
-            val method = cls.getMethod(
-                "request",
-                android.view.Display::class.java,
-                android.graphics.Rect::class.java,
-                android.graphics.Bitmap::class.java,
-                iface,
-                android.os.Handler::class.java
-            )
-            val proxy = java.lang.reflect.Proxy.newProxyInstance(
-                iface.classLoader, arrayOf(iface)
-            ) { _, _, args ->
-                val code = (args?.getOrNull(0) as? Int) ?: -1
-                main.post { onPixelCopyResult(code, dest, w, h) }
-                null
-            }
-            method.invoke(null, display, rect, dest, proxy, main)
-            Logx.d("毛玻璃：已发起抓屏请求 ${w}×$h @(${p.x},${p.y})")
-        } catch (t: Throwable) {
-            dest.recycle()
-            onBlurFailed(
-                "抓屏调用失败：${t.javaClass.simpleName}: ${t.message}" +
-                        (if (t is java.lang.reflect.InvocationTargetException)
-                            " / 原因=${t.cause?.message}" else "")
-            )
-        }
-    }
-
-    /** PixelCopy 回调：成功 → 模糊并应用；失败 → 计数 */
-    private fun onPixelCopyResult(code: Int, dest: android.graphics.Bitmap, w: Int, h: Int) {
-        if (code == 0) {
-            val blurred = try {
-                downsampleBlur(dest)
-            } catch (t: Throwable) {
-                onBlurFailed("模糊失败：${t.message}")
-                null
-            }
-            dest.recycle()
-            if (blurred != null) {
-                blurBmp = blurred
-                blurFailCount = 0
-                Prefs.setBlurFailCount(this, 0)
-                Logx.d("毛玻璃：抓屏成功 ${w}×$h → 模糊底图已更新")
-                root?.let { applyBackground(it) }
-            }
-        } else {
-            dest.recycle()
-            onBlurFailed("PixelCopy 返回码 $code")
-        }
-    }
-
-    /**
-     * 廉价模糊：降采样 1/4 → 双线性放大。
-     * 比 RenderScript ScriptIntrinsicBlur 更轻，且没有 deprecated 风险。
-     */
-    private fun downsampleBlur(src: android.graphics.Bitmap): android.graphics.Bitmap {
-        val w = src.width
-        val h = src.height
-        val sw = (w / 4).coerceAtLeast(1)
-        val sh = (h / 4).coerceAtLeast(1)
-        val small = android.graphics.Bitmap.createScaledBitmap(src, sw, sh, true)
-        val big = android.graphics.Bitmap.createScaledBitmap(small, w, h, true)
-        if (small != src && small !== big) small.recycle()
-        return big
-    }
-
-    /**
-     * 毛玻璃失败处理：连续失败 3 次 → **自动退回渐变**（写回设置，重启后依然生效）。
-     */
-    private fun onBlurFailed(reason: String) {
-        blurFailCount++
-        Prefs.setBlurFailCount(this, blurFailCount)
-        Logx.w("毛玻璃：$reason（连续失败 $blurFailCount 次）")
-        if (blurFailCount >= 3) {
-            Logx.w("毛玻璃：连续失败 3 次 → 自动退回「渐变」背景")
-            Prefs.setBgMode(this, BgMode.GRADIENT)
-            Prefs.setBlurFailCount(this, 0)
-            blurFailCount = 0
-            blurBmp = null
-            root?.let { applyBackground(it as DockLayout) }
         }
     }
 
@@ -1295,6 +1214,9 @@ class DockOverlayService : Service() {
     /** 当前实际生效的底色（渐变时取平均色），供反色采样使用 */
     private fun effectiveBgColor(ctx: Context): Int {
         // ★ v3.13.1：纯色模式直接用纯色底做反色采样
+        if (Prefs.bgMode(ctx) == BgMode.SOLID) {
+            return if (onSystemHome()) 0 else Prefs.solidBgColor(ctx)
+        }
         if (Prefs.bgSolidMode(ctx)) return Prefs.solidBgColor(ctx)
         val colors = Prefs.currentGradientColors(ctx)
         return averageColor(colors)

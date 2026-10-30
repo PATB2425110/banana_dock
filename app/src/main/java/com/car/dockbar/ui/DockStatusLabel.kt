@@ -75,7 +75,7 @@ class DockStatusLabel(private val ctx: Context) {
         }
         val tv = TextView(ctx).apply {
             textSize = TEXT_SIZE_SP
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             includeFontPadding = false
         }
         card.addView(tv)

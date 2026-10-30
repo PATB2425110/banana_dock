@@ -12,5 +12,40 @@
         <item name="android:navigationBarColor">@color/bg_page</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
+        <item name="android:textViewStyle">@style/Widget.CarDockBar.TextView</item>
+        <item name="android:buttonStyle">@style/Widget.CarDockBar.Button</item>
+        <item name="buttonStyle">@style/Widget.CarDockBar.Button</item>
+        <item name="android:editTextStyle">@style/Widget.CarDockBar.EditText</item>
+        <item name="editTextStyle">@style/Widget.CarDockBar.EditText</item>
+        <item name="switchStyle">@style/Widget.CarDockBar.Switch</item>
+        <item name="checkboxStyle">@style/Widget.CarDockBar.CheckBox</item>
+    </style>
+
+    <style name="Widget.CarDockBar.TextView" parent="Widget.AppCompat.TextView">
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
+    </style>
+
+    <style name="Widget.CarDockBar.Button" parent="Widget.AppCompat.Button">
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Widget.CarDockBar.EditText" parent="Widget.AppCompat.EditText">
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
+    </style>
+
+    <style name="Widget.CarDockBar.Switch" parent="Widget.AppCompat.CompoundButton.Switch">
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
+    </style>
+
+    <style name="Widget.CarDockBar.CheckBox" parent="Widget.AppCompat.CompoundButton.CheckBox">
+        <item name="android:fontFamily">@font/lynkco_display</item>
+        <item name="fontFamily">@font/lynkco_display</item>
     </style>
 </resources>

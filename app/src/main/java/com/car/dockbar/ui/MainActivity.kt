@@ -3,6 +3,7 @@ package com.car.dockbar.ui
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
@@ -102,6 +103,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var tvStatus: TextView
+    private lateinit var tvOverlayPerm: TextView
+    private lateinit var tvNotifPerm: TextView
+    private lateinit var tvNotifHint: TextView
+    private lateinit var tvAccPerm: TextView
+    private lateinit var tvAccHint: TextView
     private lateinit var tvBackend: TextView
     private lateinit var tvLog: TextView
     private lateinit var svLog: ScrollView
@@ -120,8 +126,8 @@ class MainActivity : AppCompatActivity() {
     private var cardOverlay: LinearLayout? = null
     /** 「Dock 图标设置」卡片（动态创建，需要记下来做页面切换） */
     private var cardDockIcon: LinearLayout? = null
-    /** 左栏入口按钮：page → 按钮，用于高亮当前页 */
-    private val navButtons = LinkedHashMap<String, TextView>()
+    /** 左栏入口行：page → 图标行，用于高亮当前页 */
+    private val navButtons = LinkedHashMap<String, NavRow>()
     /** 当前显示的页（左栏入口 key） */
     private var currentPage: String = SECTION_OVERLAY
     // ★ v1.4.97 #9：添加应用改为从已安装应用列表选择，包名输入框已删除
@@ -138,6 +144,7 @@ class MainActivity : AppCompatActivity() {
      * 只在「纯色 / 渐变」形态下显示；透明 / 毛玻璃时隐藏。
      */
     private var bgColorControlRows: List<View> = emptyList()
+    private var blurRadiusRow: View? = null
     private var tvAppDrawerSummary: TextView? = null
     private var btnAppDrawerSelection: Button? = null
     /** 歌词悬浮窗配置区控件 */
@@ -311,6 +318,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindViews() {
         tvStatus = findViewById(R.id.tvStatus)
+        tvOverlayPerm = findViewById(R.id.tvOverlayPerm)
+        tvNotifPerm = findViewById(R.id.tvNotifPerm)
+        tvNotifHint = findViewById(R.id.tvNotifHint)
+        tvAccPerm = findViewById(R.id.tvAccPerm)
+        tvAccHint = findViewById(R.id.tvAccHint)
         tvBackend = findViewById(R.id.tvBackend)
         tvLog = findViewById(R.id.tvLog)
         svLog = findViewById(R.id.svLog)
@@ -400,11 +412,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnGrantNotif).setOnClickListener {
             IntentLauncher.requestNotificationAccess(this)
         }
-        findViewById<Button>(R.id.btnGrantAccessibility).setOnClickListener {
-            runCatching {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }.onFailure { Logx.e("打开无障碍设置失败", it) }
-        }
+        findViewById<Button>(R.id.btnGrantAccessibility).setOnClickListener { openAccessibilitySettings() }
+        findViewById<Button>(R.id.btnGrantAccessibilityDock).setOnClickListener { openAccessibilitySettings() }
 
         // 子界面入口：应用名单、歌词与日志分别单独开页，主设置页只留入口按钮
         findViewById<Button>(R.id.btnOpenApps).setOnClickListener {
@@ -474,7 +483,7 @@ class MainActivity : AppCompatActivity() {
             text = "Dock图标设置"
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 16f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
         })
 
         root.addView(Button(this).apply {
@@ -531,17 +540,13 @@ class MainActivity : AppCompatActivity() {
             onChange = { Prefs.setFadeDurationMs(this, it * 100L) }
         )
 
-        // --- ★ v1.4.73：底部上滑临时显示 Dock ---
-        //  Dock 被「打开时隐藏名单」里的应用藏起来后，从屏幕底部往上滑 → 临时显示
-        //  Dock 若干秒 → 自动再藏起来。
-        // ── [S03] ★ 底部上滑临时显示 Dock ──────────────
+        val overlaySide = findViewById<LinearLayout>(R.id.colOverlaySide)
         addSwitchRow(
-            root, "★ 底部上滑临时显示 Dock",
+            overlaySide, "底部上滑临时显示 Dock",
             Prefs.swipeShowDockEnabled(this)
         ) { Prefs.setSwipeShowDockEnabled(this, it) }
-        // ── [S04] 上滑后 Dock 显示时长 ────────────────
         addSeekRow(
-            root, "上滑后 Dock 显示时长",
+            overlaySide, "上滑后 Dock 显示时长",
             (Prefs.swipeShowDockMs(this) / 1000L).toInt(), 30,
             { "%d 秒".format(it) },
             onChange = { Prefs.setSwipeShowDockMs(this, it * 1000L) }
@@ -574,7 +579,7 @@ class MainActivity : AppCompatActivity() {
             text = "底色"
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(0, dp(14), 0, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -586,6 +591,14 @@ class MainActivity : AppCompatActivity() {
         //   ★ 两个「底色透明度」滑杆**只属于纯色 / 渐变**，
         //     切到透明或毛玻璃时自动隐藏（毛玻璃的色调是固定的淡色）。
         addBgModeRow(appearance)
+        blurRadiusRow = addSeekRow(
+            appearance, "模糊度",
+            Prefs.blurRadius(this), 24,
+            { if (it == 0) "无" else "$it" },
+            onChange = { Prefs.setBlurRadius(this, it) }
+        )
+        blurRadiusRow?.visibility =
+            if (Prefs.bgMode(this) == BgMode.BLUR) View.VISIBLE else View.GONE
 
         // 实时预览条：按当前配置（含系统深浅色）画一条一模一样的渐变
         val preview = GradientPreviewView(this).apply {
@@ -799,7 +812,7 @@ class MainActivity : AppCompatActivity() {
             text = "歌词悬浮窗"
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 14f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(0, dp(20), 0, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -855,7 +868,7 @@ class MainActivity : AppCompatActivity() {
             text = "② 外观（拖动即生效；若歌词窗未启动，请先点上面的启动按钮）"
             setTextColor(0xFF9AA1AE.toInt())
             textSize = 11f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(0, dp(12), 0, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -937,7 +950,7 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
-        val srcLabels = listOf("自动", "网易云", "LRCLIB", "自定义")
+        val srcLabels = listOf("自动", "网易云", "LRCLIB", "自定义", "QQ音乐")
         val srcRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val srcButtons = mutableListOf<Pair<Int, Button>>()
         for ((i, lb) in srcLabels.withIndex()) {
@@ -961,100 +974,6 @@ class MainActivity : AppCompatActivity() {
         lyricSourceButtons = srcButtons
         updateSourceButtons()
         root.addView(srcRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-
-        // 自定义接口
-        addEditRow(root, "自定义歌词接口（含 {title}/{artist}）", Prefs.lyricUrl(this)) {
-            Prefs.setLyricUrl(this, it)
-            sendLyricUpdate()
-        }
-
-        root.addView(Button(this).apply {
-            text = "立即获取歌词"
-            textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
-            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-            setOnClickListener {
-                LyricMonitor.forceFetch()
-                sendLyricUpdate()
-                Logx.d("已手动触发歌词获取")
-            }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(8) })
-
-        root.addView(Button(this).apply {
-            text = "导入 / 粘贴歌词到当前歌曲"
-            textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
-            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-            setOnClickListener { showManualLyricDialog() }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(6) })
-
-        root.addView(Button(this).apply {
-            text = "授权存储权限（本地 .lrc 兜底找词）"
-            textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
-            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-            setOnClickListener { requestStorageForLrc() }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(6) })
-
-        // ④ 数据源
-        root.addView(TextView(this).apply {
-            text = "元数据字段映射"
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
-            setPadding(0, dp(10), 0, 0)
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-        val mapLabels = listOf(1 to "车机错位：ARTIST=歌名", 0 to "标准：TITLE=歌名")
-        val mapRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val mapButtons = mutableListOf<Pair<Int, Button>>()
-        for ((mode, lb) in mapLabels) {
-            val b = Button(this).apply {
-                text = lb
-                textSize = 11f
-                minWidth = 0
-                minimumWidth = 0
-                setPadding(dp(6), 0, dp(6), 0)
-                setOnClickListener {
-                    Prefs.setLyricMapMode(this@MainActivity, mode)
-                    updateMapButtons()
-                    LyricMonitor.invalidate()
-                    sendLyricUpdate()
-                }
-            }
-            mapButtons += mode to b
-            mapRow.addView(b, LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginStart = dp(4) })
-        }
-        lyricMapButtons = mapButtons
-        updateMapButtons()
-        root.addView(mapRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-
-        // 追加广播 action
-        addEditRow(root, "追加广播 action（每行一个，留空=只用默认）", Prefs.lyricActions(this)) {
-            Prefs.setLyricActions(this, it)
-            LyricMonitor.reloadActions()
-            Logx.d("广播数据源已更新，共监听默认 + ${it.split("\n").filter { l -> l.isNotBlank() }.size} 个")
-        }
-
-        root.addView(TextView(this).apply {
-            text = "提示：切歌 / 重播时进度归零，3 秒后自动重新读取歌曲信息并抓词；" +
-                    "歌词不跟进度时先确认「通知使用权」已授予（进度源会显示 MediaSession）。"
-            setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
-            setPadding(0, dp(8), 0, 0)
-        }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
@@ -1145,16 +1064,16 @@ class MainActivity : AppCompatActivity() {
             text = "日志上传（远程排查）"
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 14f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(0, dp(16), 0, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
         val tvHint = TextView(this).apply {
-            text = "闪退 / 崩溃会被记录：Java 崩溃当场上传；" +
-                    "native 崩溃（SIGSEGV 等）写盘后，**下次打开时自动补传**。\n" +
-                    "只上传 App 日志、崩溃堆栈与车控原始值，不含账号信息。"
+            text = "有网时日志自动上传（大约每 1.5 秒一批），不用点按钮。\n" +
+                    "没网先记在本机，恢复网络后补传。闪退仍会单独上传。\n" +
+                    "只含 App 日志、崩溃堆栈与车控原始值，不含账号。"
             setTextColor(0xFF9AA1AE.toInt())
             textSize = 11f
             setPadding(0, dp(4), 0, 0)
@@ -1183,10 +1102,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ⚠️ 实验开关：默认关闭。温度是 ECarX 的 Customize（float）通道，
-        //    注册进 watcher 后厂商库会回调 onCustomizeFunctionValueChanged，
-        //    普通 App 进程一收到就 native SIGSEGV —— 这就是 CX11 上连续闪退的根因。
-        //    打开后若车机开始闪退，下次启动会被自动关回去（见 App.onCreate 熔断）。
+        // 默认打开。DCY11 的设定温度只有这条 float 回调能读到。
+        // 真的闪退过（有上次会话，且没活过 15 秒）才会被 App.onCreate 关回去。
+        // 首次安装没有上次会话，不能因为缺少 clean_exit 就关。
         // ── [S20] ⚠ 温度事件监听（实验，可能闪退） ────────────
         addSwitchRow(
             root, "⚠ 温度事件监听（实验，可能闪退）",
@@ -1784,7 +1702,7 @@ class MainActivity : AppCompatActivity() {
             text = title
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 14f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(dpInt(4), dpInt(2), dpInt(4), dpInt(6))
         })
         val body = LinearLayout(this).apply {
@@ -2062,6 +1980,12 @@ class MainActivity : AppCompatActivity() {
         }.onFailure { Logx.e("发送名单变更广播失败", it) }
     }
 
+    private fun openAccessibilitySettings() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }.onFailure { Logx.e("打开无障碍设置失败", it) }
+    }
+
     /** 无障碍（前台应用检测）是否已开启 */
     private fun isAccessibilityEnabled(): Boolean {
         val expected = "$packageName/${ForegroundAppService::class.java.name}"
@@ -2086,12 +2010,15 @@ class MainActivity : AppCompatActivity() {
         } else {
             " —— 名单需先开启无障碍才生效"
         }
+        tvAccPerm.text = if (on) "已授权" else "未授权"
+        tvAccPerm.setTextColor(permColor(on))
+        tvAccHint.visibility = if (on) View.GONE else View.VISIBLE
         tvAccStatus.text = android.text.SpannableStringBuilder().apply {
             append("前台应用检测：")
             val start = length
             append(state)
             setSpan(
-                android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                android.text.style.TypefaceSpan(AppFont.bold(this@MainActivity)),
                 start, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
             append(tail)
@@ -2111,50 +2038,81 @@ class MainActivity : AppCompatActivity() {
     /** 歌词区动态 view 在 llRoot 里的起始索引（-1 = 当前没加进来） */
     private var lyricSectionStart = -1
 
-    /** 左栏 6 个入口：page key → 显示文字 */
+    /** 左栏入口。右侧仍是原来的页面，只改左侧样子。 */
     private val NAV_ITEMS = listOf(
-        SECTION_OVERLAY to "悬浮 Dock 栏",
-        SECTION_APPEARANCE to "外观",
-        SECTION_ICONS to "Dock 图标",
-        SECTION_APPS to "常驻应用",
-        SECTION_LYRIC to "歌词悬浮窗",
-        SECTION_LOGS to "日志"
+        NavSpec(SECTION_OVERLAY, "悬浮 Dock 栏", R.drawable.ic_nav_dock),
+        NavSpec(SECTION_APPEARANCE, "外观", R.drawable.ic_nav_home),
+        NavSpec(SECTION_ICONS, "Dock条目", R.drawable.ic_nav_grid),
+        NavSpec(SECTION_LYRIC, "歌词", R.drawable.ic_nav_doc),
+        NavSpec(SECTION_APPS, "常驻应用", R.drawable.ic_nav_list),
+        NavSpec(SECTION_LOGS, "诊断", R.drawable.ic_nav_pulse)
     )
 
-    /** 生成左栏入口按钮（每个入口切换右栏内容） */
+    /** 生成左栏：标题 + 图标文字行。当前项左侧青色竖条。 */
     private fun buildNav() {
         val nav = findViewById<LinearLayout>(R.id.llNav)
         nav.removeAllViews()
         navButtons.clear()
-        for ((page, label) in NAV_ITEMS) {
-            val btn = TextView(this).apply {
-                text = label
-                // ★ v1.5.3：按钮 110×56，字号回到能看清的大小（最多折 2 行），文字居中
-                textSize = 13f
-                maxLines = 2
+        nav.addView(TextView(this).apply {
+            text = "设置"
+            textSize = 22f
+            setTextColor(0xFFF2F4F8.toInt())
+            typeface = AppFont.bold(this@MainActivity)
+            setPadding(dp(20), dp(8), dp(12), dp(18))
+        })
+        for (item in NAV_ITEMS) {
+            val bar = View(this).apply {
+                setBackgroundColor(0x00000000)
+                layoutParams = LinearLayout.LayoutParams(dp(3), dp(28)).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+            }
+            val icon = ImageView(this).apply {
+                setImageResource(item.icon)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply {
+                    marginStart = dp(16)
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+            }
+            val label = TextView(this).apply {
+                text = item.label
+                textSize = 16f
+                maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 includeFontPadding = false
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-                setTextColor(0xFFEDEFF3.toInt())
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_field)
-                layoutParams = LinearLayout.LayoutParams(dp(110), dp(56)).apply {
-                    bottomMargin = dp(8)
-                    // 左栏 200dp 宽，按钮居中摆放
-                    gravity = Gravity.CENTER_HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.nav_idle))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                ).apply {
+                    marginStart = dp(12)
+                    gravity = Gravity.CENTER_VERTICAL
                 }
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, dp(12), 0)
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_item_press)
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { showPage(page) }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(56)
+                )
+                setOnClickListener { showPage(item.page) }
+                addView(bar)
+                addView(icon)
+                addView(label)
             }
-            nav.addView(btn)
-            navButtons[page] = btn
+            nav.addView(row)
+            navButtons[item.page] = NavRow(bar, icon, label)
         }
         nav.addView(TextView(this).apply {
             text = "v${Prefs.appVersion(this@MainActivity)}"
             textSize = 11f
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-            setPadding(0, dp(10), 0, 0)
+            setPadding(dp(20), dp(16), dp(12), 0)
         })
     }
 
@@ -2181,23 +2139,26 @@ class MainActivity : AppCompatActivity() {
         Logx.d("设置页：切到「${navLabel(page)}」")
     }
 
-    /** 左栏当前页高亮 */
+    /** 左栏当前页：青色竖条、青色图标和文字 */
     private fun updateNavSelection() {
-        for ((page, btn) in navButtons) {
+        val accent = ContextCompat.getColor(this, R.color.nav_accent)
+        val idle = ContextCompat.getColor(this, R.color.nav_idle)
+        for ((page, row) in navButtons) {
             val on = page == currentPage
-            btn.setTextColor(if (on) 0xFFFFFFFF.toInt() else 0xFFEDEFF3.toInt())
-            btn.background = ContextCompat.getDrawable(
-                this, if (on) R.drawable.bg_button_primary else R.drawable.bg_field
-            )
-            btn.setTypeface(
-                null,
-                if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
-            )
+            val color = if (on) accent else idle
+            row.bar.setBackgroundColor(if (on) accent else 0x00000000)
+            row.icon.imageTintList = ColorStateList.valueOf(color)
+            row.label.setTextColor(color)
+            row.label.typeface = if (on) AppFont.bold(this) else AppFont.regular(this)
         }
     }
 
     private fun navLabel(page: String): String =
-        NAV_ITEMS.firstOrNull { it.first == page }?.second ?: page
+        NAV_ITEMS.firstOrNull { it.page == page }?.label ?: page
+
+    private data class NavSpec(val page: String, val label: String, val icon: Int)
+
+    private class NavRow(val bar: View, val icon: ImageView, val label: TextView)
 
     /** 兼容老入口（「更多设置」那 3 个按钮 / 外部带 extra 进来） */
     private fun enterSection(name: String) = showPage(name)
@@ -2304,31 +2265,35 @@ class MainActivity : AppCompatActivity() {
         val running = DockOverlayService.alive
         val mounted = DockOverlayService.attached
 
+        tvOverlayPerm.text = if (overlayOk) "已授权" else "未授权"
+        tvOverlayPerm.setTextColor(permColor(overlayOk))
+        tvNotifPerm.text = if (notifOk) "已授权" else "未授权"
+        tvNotifPerm.setTextColor(permColor(notifOk))
+        tvNotifHint.visibility = if (notifOk) View.GONE else View.VISIBLE
+
         tvStatus.text = buildString {
-            append("悬浮窗权限：").append(if (overlayOk) "已授权 ✓" else "未授权 ✗")
-            append("　通知使用权：").append(if (notifOk) "已授权 ✓" else "未授权 ✗")
-            if (!notifOk) {
-                append("\n⚠ 没有通知使用权就读不到媒体会话，音乐卡片会显示「暂无播放」。点下方「授权通知使用权」，在系统列表里打开 CarDockBar")
-            }
-            append("\n服务：").append(
+            append("服务：").append(
                 when {
-                    running && mounted -> "运行中 ✓　悬浮窗已显示 ✓"
+                    running && mounted -> "运行中，悬浮窗已显示"
                     running && DockOverlayService.hiddenByApp ->
-                        "运行中 ✓　悬浮窗已隐藏（当前应用在「隐藏 Dock 名单」里，属正常）"
-                    running -> "运行中，但悬浮窗没挂上 ✗"
-                    else -> "未运行 ✗"
+                        "运行中，悬浮窗已隐藏（当前应用在「隐藏 Dock 名单」里，属正常）"
+                    running -> "运行中，但悬浮窗没挂上"
+                    else -> "未运行"
                 }
             )
-            append("\n车控：").append(if (st.connected) "已连接 ✓" else "未连接 ✗")
-            append("　模式：").append(if (Prefs.simulate(this@MainActivity)) "模拟" else "真实")
+            append("\n车控：").append(if (st.connected) "已连接" else "未连接")
+            append("    模式：").append(if (Prefs.simulate(this@MainActivity)) "模拟" else "真实")
             if (DockOverlayService.lastError.isNotBlank()) {
-                append("\n⚠ ").append(DockOverlayService.lastError)
+                append("\n").append(DockOverlayService.lastError)
             }
         }
         tvBackend.text = "后端：${VehicleBridge.backend.label}" +
                 "　温度通道：${VehicleBridge.floatChannelName}" +
                 if (Prefs.simulate(this)) "（模拟模式已开启，忽略真实通道）" else ""
     }
+
+    private fun permColor(ok: Boolean): Int =
+        if (ok) 0xFF3DDC97.toInt() else ContextCompat.getColor(this, R.color.warn)
 
     // =====================================================================
     // 车控通道表
@@ -2529,7 +2494,7 @@ class MainActivity : AppCompatActivity() {
             text = "背景形态"
             setTextColor(0xFFEDEFF3.toInt())
             textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(this@MainActivity)
             setPadding(0, dp(14), 0, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -2540,10 +2505,6 @@ class MainActivity : AppCompatActivity() {
         BgMode.values().forEach { m ->
             val b = smallBtn(m.label) {
                 Prefs.setBgMode(this, m)
-                if (m == BgMode.BLUR) {
-                    Prefs.setBlurFailCount(this, 0)
-                    Logx.w("已切到毛玻璃（实验特性）：抓屏失败或闪退会自动退回「渐变」")
-                }
                 refreshBgModeButtons(buttons, m)
                 refreshGradientPreview()
                 reloadService()
@@ -2584,6 +2545,7 @@ class MainActivity : AppCompatActivity() {
             row.visibility = if (showColorControls) View.VISIBLE else View.GONE
         }
         gradientPreview?.visibility = if (showColorControls) View.VISIBLE else View.GONE
+        blurRadiusRow?.visibility = if (selected == BgMode.BLUR) View.VISIBLE else View.GONE
     }
 
     private fun lp(marginStartPx: Float, weight: Float): LinearLayout.LayoutParams =

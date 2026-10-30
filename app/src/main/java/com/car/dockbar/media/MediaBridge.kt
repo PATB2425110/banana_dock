@@ -1,5 +1,6 @@
 package com.car.dockbar.media
 
+import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -10,11 +11,14 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.service.notification.StatusBarNotification
 import android.text.TextUtils
 import com.car.dockbar.util.Logx
 
@@ -47,6 +51,29 @@ object MediaBridge {
     /** 解码专辑图 URI 时用（content:// 需要 ContentResolver） */
     private var appCtx: Context? = null
     private var started = false
+
+    /**
+     * CS11 的 QQ 音乐壳。它不进 [getActiveSessions]，歌名在自己的媒体通知里。
+     * 只有标准会话没有真实歌名时才用这条，避免盖住汽水 / 网易云。
+     */
+    private const val FLYME_MUSIC = "com.flyme.auto.music"
+    private var noteTitle = ""
+    private var noteArtist = ""
+    private var noteArt: Bitmap? = null
+    private var noteKey = ""
+    private var usingNote = false
+    private var noteKeysLogged = false
+    private var serviceNoticeLogged = false
+    private var imagesLogged = false
+    private var bundleLoggedFor = ""
+    private var notifArtLoggedFor = ""
+    private var centerActive = false
+    private var centerTitle = ""
+    private var centerArtist = ""
+    private var centerAlbum = ""
+    private var centerArt: Bitmap? = null
+    private var centerPlaying = false
+    private var centerLabel = ""
 
     private val sessionListener =
         MediaSessionManager.OnActiveSessionsChangedListener { sessions ->
@@ -81,10 +108,10 @@ object MediaBridge {
     }
 
     fun start(ctx: Context) {
-        if (started) { refresh(ctx); return }
+        appCtx = ctx.applicationContext
         if (!hasPermission(ctx)) {
             Logx.e("媒体：没有通知使用权，音乐卡片将显示占位。请在主界面点「授权通知使用权」")
-            publish(MediaInfo())
+            if (!started) publish(MediaInfo())
             return
         }
         started = true
@@ -96,6 +123,7 @@ object MediaBridge {
             val sessions = manager?.getActiveSessions(component)
             bindBest(sessions)
             Logx.d("媒体：已连接，当前 ${sessions?.size ?: 0} 个会话")
+            DockNotificationListener.instance?.let { ingestNotifications(it.activeNotifications) }
         } catch (t: Throwable) {
             started = false
             Logx.e("媒体：连接失败", t)
@@ -136,6 +164,113 @@ object MediaBridge {
         }
     }
 
+    /** 通知监听刚连上时，把当前通知扫一遍 */
+    fun ingestNotifications(items: Array<StatusBarNotification>?) {
+        items?.filter { it.packageName == FLYME_MUSIC }?.forEach {
+            ingestNotification(it, removed = false)
+        }
+    }
+
+    /**
+     * `com.flyme.auto.music` 的媒体通知。进度条会反复 post 同一条，
+     * 歌名没变就不刷卡片、也不打日志。
+     */
+    fun ingestNotification(sbn: StatusBarNotification, removed: Boolean) {
+        if (sbn.packageName != FLYME_MUSIC) return
+        if (removed) {
+            if (noteTitle.isEmpty() && !usingNote) return
+            noteTitle = ""
+            noteArtist = ""
+            noteArt = null
+            noteKey = ""
+            usingNote = false
+            Logx.d("媒体：通知 $FLYME_MUSIC 已移除，退回媒体会话")
+            appCtx?.let { refresh(it) }
+            return
+        }
+        val n = sbn.notification ?: return
+        val extras = n.extras
+        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
+        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+        val sub = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim().orEmpty()
+        if (!noteKeysLogged) {
+            noteKeysLogged = true
+            val keys = extras?.keySet()?.joinToString(",") { it.substringAfterLast('.') } ?: ""
+            Logx.d("媒体：通知 $FLYME_MUSIC extras=[$keys] title='$title' text='$text'")
+        }
+        // CX11 上这条是系统前台服务通知（「QQ音乐正在运行」），不是歌曲。
+        // 通知 extras 里的 images 仍可能是封面，歌名继续走媒体会话。
+        val extraArt = artFromFlymeExtras(extras)
+        if (extraArt != null) noteArt = extraArt
+        if (isSystemRunningNotice(title, text)) {
+            if (!serviceNoticeLogged) {
+                serviceNoticeLogged = true
+                Logx.d("媒体：忽略 QQ「正在运行」通知，不把它当成歌曲")
+            }
+            if (usingNote) {
+                usingNote = false
+                noteTitle = ""
+                noteArtist = ""
+                noteKey = ""
+                appCtx?.let { refresh(it) }
+            } else if (extraArt != null && info.art == null && isRealTitle(info.title)) {
+                publish(info.copy(art = extraArt))
+            }
+            return
+        }
+        if (!isRealTitle(title)) return
+        val artist = when {
+            text.isNotEmpty() && text != title -> text
+            sub.isNotEmpty() && sub != title -> sub
+            else -> ""
+        }
+        val key = "$title|$artist"
+        val art = appCtx?.let { artFromNotification(it, n) }
+        if (key == noteKey && art == null) return
+        noteTitle = title
+        noteArtist = artist
+        if (art != null) noteArt = art
+        noteKey = key
+        @Suppress("DEPRECATION")
+        val token = extras?.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+        if (token != null) attachNoteToken(token)
+        usingNote = true
+        Logx.d("媒体：采用通知 $FLYME_MUSIC title=$title artist=$artist token=${token != null}")
+        publishNote()
+    }
+
+    private fun sessionHasRealTitle(): Boolean =
+        isRealTitle(controller?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE))
+
+    private fun attachNoteToken(token: MediaSession.Token) {
+        val ctx = appCtx ?: return
+        if (controller?.sessionToken == token) return
+        runCatching { controller?.unregisterCallback(controllerCallback) }
+        val c = MediaController(ctx, token)
+        controller = c
+        runCatching { c.registerCallback(controllerCallback, main) }
+        Logx.d("媒体：改用 $FLYME_MUSIC 通知里的会话")
+    }
+
+    private fun artFromNotification(ctx: Context, n: Notification): Bitmap? {
+        val d = n.getLargeIcon()?.loadDrawable(ctx) ?: return null
+        return copyArt(drawableToBitmap(d))
+    }
+
+    /** 会话交来的封面经常还被播放器持有，直接画在悬浮窗上会是空白。先复制成普通位图。 */
+    private fun copyArt(src: Bitmap?): Bitmap? {
+        if (src == null || src.isRecycled) return null
+        return runCatching { src.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+    }
+
+    /** 蓝牙 AVRCP 没歌时会填 "Not Provided"，不能当成真实歌名 */
+    private fun isRealTitle(t: String?): Boolean {
+        if (t.isNullOrBlank()) return false
+        val s = t.trim()
+        return !s.equals("Not Provided", ignoreCase = true) &&
+                s != "-" && s != "未知" && s != "未知曲目"
+    }
+
     /**
      * ★★ v1.4.88：**优先选「有封面」的会话**。
      *
@@ -157,6 +292,10 @@ object MediaBridge {
     private fun bindBest(sessions: List<MediaController>?) {
         val list = sessions ?: emptyList()
         if (list.isEmpty()) {
+            if (usingNote && isRealTitle(noteTitle)) {
+                publishNote()
+                return
+            }
             if (controller != null) {
                 runCatching { controller?.unregisterCallback(controllerCallback) }
                 controller = null
@@ -197,6 +336,16 @@ object MediaBridge {
             val top = list.maxOf { scoreOf(it) }
             best = list.first { scoreOf(it) == top }
         }
+
+        val bestTitle = runCatching {
+            best?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        }.getOrNull()
+        // 标准会话没有歌名时，保留 Flyme / QQ 通知里的那条
+        if (usingNote && isRealTitle(noteTitle) && !isRealTitle(bestTitle)) {
+            publishNote()
+            return
+        }
+        usingNote = false
 
         if (best?.sessionToken == cur?.sessionToken) {
             publish()
@@ -249,9 +398,60 @@ object MediaBridge {
             if (runCatching { md.getBitmap(k) }.getOrNull() != null) return true
         }
         for (k in ART_URI_KEYS) {
-            if (!runCatching { md.getString(k) }.getOrNull().isNullOrBlank()) return true
+            val uri = runCatching { md.getString(k) }.getOrNull()
+                ?: runCatching { md.getText(k)?.toString() }.getOrNull()
+            if (!uri.isNullOrBlank()) return true
         }
-        return false
+        val pkg = runCatching { c.packageName }.getOrNull() ?: return false
+        if (pkg == "com.android.bluetooth" || pkg == FLYME_MUSIC) return false
+        val items = DockNotificationListener.instance?.activeNotifications ?: return false
+        return items.any { it.packageName == pkg && it.notification?.getLargeIcon() != null }
+    }
+
+    /** 媒体中心推来的当前曲目。有歌名时盖过空的蓝牙会话。 */
+    fun onCenterTrack(
+        title: String,
+        artist: String,
+        album: String,
+        art: Bitmap?,
+        playing: Boolean,
+        sourceLabel: String
+    ) {
+        if (!isRealTitle(title)) return
+        val changed = title != centerTitle || artist != centerArtist || sourceLabel != centerLabel
+        centerActive = true
+        centerTitle = title
+        centerArtist = artist
+        centerAlbum = album
+        if (art != null) centerArt = art
+        centerPlaying = playing
+        centerLabel = sourceLabel
+        if (changed) Logx.d("媒体中心：$sourceLabel title=$title artist=$artist playing=$playing")
+        publish(
+            MediaInfo(
+                hasSession = true,
+                title = title,
+                artist = artist,
+                album = album,
+                art = centerArt,
+                isPlaying = playing
+            )
+        )
+    }
+
+    fun onCenterState(playing: Boolean) {
+        if (!centerActive) return
+        centerPlaying = playing
+        publish(
+            MediaInfo(
+                hasSession = true,
+                title = centerTitle,
+                artist = centerArtist,
+                album = centerAlbum,
+                art = centerArt,
+                isPlaying = playing
+            )
+        )
     }
 
     private fun publish() {
@@ -301,15 +501,36 @@ object MediaBridge {
             Logx.d("媒体：★ 专辑图已获取 ${art.width}×${art.height}")
         }
         val playing = ps?.state == PlaybackState.STATE_PLAYING
+        val showTitle = if (isRealTitle(title)) title else if (isRealTitle(noteTitle)) noteTitle else title
+        val showArtist = if (isRealTitle(title)) artist else if (noteArtist.isNotEmpty()) noteArtist else artist
+        val showArt = art ?: noteArt
 
         publish(
             MediaInfo(
-                hasSession = c != null && (!TextUtils.isEmpty(title) || ps != null),
-                title = title,
-                artist = artist,
+                hasSession = c != null && (!TextUtils.isEmpty(showTitle) || ps != null) ||
+                        isRealTitle(showTitle),
+                title = showTitle,
+                artist = showArtist,
                 album = album,
-                art = art,
-                isPlaying = playing
+                art = showArt,
+                isPlaying = playing || (usingNote && notePlaying())
+            )
+        )
+    }
+
+    private fun notePlaying(): Boolean =
+        controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+
+    /** 通知有歌名、会话 token 还没挂上时，直接用通知内容刷卡片 */
+    private fun publishNote() {
+        publish(
+            MediaInfo(
+                hasSession = true,
+                title = noteTitle,
+                artist = noteArtist,
+                album = "",
+                art = noteArt,
+                isPlaying = notePlaying()
             )
         )
     }
@@ -367,7 +588,8 @@ object MediaBridge {
             MediaMetadata.METADATA_KEY_DISPLAY_ICON
         )) {
             val d = runCatching { md.getBitmap(key) }.getOrNull()
-            if (d != null) return d
+            val copy = copyArt(d)
+            if (copy != null) return copy
         }
         // ★ v1.4.64：getBitmap 拿不到时，退回 URI 自己解码。
         //   很多第三方播放器（尤其车机定制的酷狗 / CloudMusic）只填
@@ -378,8 +600,141 @@ object MediaBridge {
         val uri = mdText(md, MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
             ?: mdText(md, MediaMetadata.METADATA_KEY_ART_URI)
             ?: mdText(md, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
-        return uri?.let { decodeArtUri(it) }
+        uri?.let { copyArt(decodeArtUri(it)) }?.let { return it }
+        runCatching { md.description }.getOrNull()?.let { desc ->
+            copyArt(desc.iconBitmap)?.let { return it }
+            desc.iconUri?.toString()?.let { copyArt(decodeArtUri(it)) }?.let { return it }
+        }
+        artFromMetadataBundle(md)?.let { return it }
+        // 酷狗车机版的封面在自己的媒体通知大图里，会话 metadata 的 getBitmap 经常是空的
+        return artFromPlayerNotification()
     }
+
+    /**
+     * CX11 的酷狗/互联会话在标准 key 上没有封面。Android 9 又没有 keys()，
+     * 这里直接读 MediaMetadata 内部 Bundle，有 Bitmap 或本地路径就用。
+     */
+    private fun artFromMetadataBundle(md: MediaMetadata): Bitmap? {
+        val bundle = runCatching {
+            val f = MediaMetadata::class.java.getDeclaredField("mBundle")
+            f.isAccessible = true
+            (f.get(md) as? Bundle)?.also { it.classLoader = Bitmap::class.java.classLoader }
+        }.getOrNull() ?: return null
+        val title = mdText(md, MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+        val logThis = title.isNotEmpty() && title != bundleLoggedFor
+        if (logThis) bundleLoggedFor = title
+        var found: Bitmap? = null
+        for (k in bundle.keySet()) {
+            val v = runCatching { bundle.get(k) }.getOrNull()
+            if (logThis) Logx.d("媒体：   bundle ${k.substringAfterLast('.')} = ${describeExtra(v)}")
+            if (found == null) found = bitmapFromExtra(v, minSide = 32)
+        }
+        return found
+    }
+
+    /** Flyme QQ 的通知没有 MediaSession，封面若有，在 extras 的 images 里。 */
+    private fun artFromFlymeExtras(extras: Bundle?): Bitmap? {
+        if (extras == null) return null
+        val key = extras.keySet().firstOrNull { it == "images" || it.endsWith(".images") } ?: return null
+        val v = runCatching { extras.get(key) }.getOrNull()
+        if (!imagesLogged) {
+            imagesLogged = true
+            Logx.d("媒体：QQ 通知 images = ${describeExtra(v)}")
+        }
+        return bitmapFromExtra(v, minSide = 96)
+    }
+
+    private fun describeExtra(v: Any?): String = when (v) {
+        null -> "null"
+        is Bitmap -> "Bitmap ${v.width}×${v.height}"
+        is String -> "String ${v.take(80)}"
+        is ArrayList<*> -> "ArrayList(${v.size}) " + v.take(3).joinToString(",") { describeExtra(it) }
+        is Bundle -> "Bundle[${v.keySet().joinToString(",") { it.substringAfterLast('.') }}]"
+        else -> v.javaClass.name
+    }
+
+    private fun bitmapFromExtra(v: Any?, minSide: Int): Bitmap? {
+        val bmp = when (v) {
+            is Bitmap -> copyArt(v)
+            is android.graphics.drawable.Icon -> {
+                val ctx = appCtx ?: return null
+                val d = runCatching { v.loadDrawable(ctx) }.getOrNull() ?: return null
+                copyArt(drawableToBitmap(d))
+            }
+                is String -> localArt(v)
+            is CharSequence -> localArt(v.toString())
+            is android.net.Uri -> localArt(v.toString())
+            is ByteArray -> {
+                if (v.size < 64) null
+                else copyArt(BitmapFactory.decodeByteArray(v, 0, v.size))
+            }
+            is ArrayList<*> -> {
+                for (item in v) {
+                    bitmapFromExtra(item, minSide)?.let { return it }
+                }
+                null
+            }
+            is Bundle -> {
+                for (k in v.keySet()) {
+                    bitmapFromExtra(v.get(k), minSide)?.let { return it }
+                }
+                null
+            }
+            else -> null
+        } ?: return null
+        if (bmp.width < minSide || bmp.height < minSide) return null
+        return bmp
+    }
+
+    private fun localArt(path: String): Bitmap? {
+        if (!path.startsWith("/") && !path.startsWith("file://") && !path.startsWith("content://")) return null
+        return copyArt(decodeArtUri(path))
+    }
+
+    /**
+     * 当前会话对应播放器的通知大图。酷狗（com.kugou.android.auto）把封面放在这里，
+     * MediaMetadata.getBitmap 取到的是空。
+     */
+    private fun artFromPlayerNotification(): Bitmap? {
+        val pkg = runCatching { controller?.packageName }.getOrNull() ?: return null
+        if (pkg == "com.android.bluetooth" || pkg == FLYME_MUSIC) return null
+        val ctx = appCtx ?: return null
+        val items = DockNotificationListener.instance?.activeNotifications ?: return null
+        var best: Bitmap? = null
+        var bestArea = 0
+        for (sbn in items) {
+            if (sbn.packageName != pkg) continue
+            val n = sbn.notification ?: continue
+            val found = ArrayList<Bitmap>(4)
+            artFromNotification(ctx, n)?.let { found.add(it) }
+            val extras = n.extras
+            if (extras != null) {
+                runCatching { extras.classLoader = Bitmap::class.java.classLoader }
+                for (k in extras.keySet()) {
+                    val v = runCatching { extras.get(k) }.getOrNull()
+                    bitmapFromExtra(v, minSide = 48)?.let { found.add(it) }
+                }
+            }
+            for (b in found) {
+                val area = b.width * b.height
+                if (area > bestArea) {
+                    best = b
+                    bestArea = area
+                }
+            }
+        }
+        val title = runCatching {
+            controller?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        }.getOrNull().orEmpty()
+        if (best != null && title != notifArtLoggedFor) {
+            notifArtLoggedFor = title
+            Logx.d("媒体：★ 封面取自 $pkg 通知 ${best.width}×${best.height}")
+        }
+        return best
+    }
+
+    private fun isSystemRunningNotice(title: String, text: String): Boolean =
+        title.contains("正在运行") || text.contains("点按即可了解详情")
 
     /** 解码专辑图 URI（http/https 走网络；content/file 走 ContentResolver） */
     /**
@@ -403,6 +758,19 @@ object MediaBridge {
      */
     private fun decodeArtUri(uri: String): Bitmap? {
         if (uri.isBlank()) return null
+        if (uri.startsWith("content://")) {
+            val ctx = appCtx ?: return null
+            return runCatching {
+                ctx.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            }.getOrElse { e ->
+                Logx.e("媒体：专辑图 content 读取失败 $uri", e)
+                null
+            }?.also {
+                Logx.d("媒体：★ 专辑图读取成功 ${it.width}×${it.height} ← $uri")
+            }
+        }
         // 统一剥掉可能的 file:// 前缀，剩下的就是文件系统绝对路径
         val path = uri.removePrefix("file://")
         if (!path.startsWith("/")) {
@@ -442,6 +810,22 @@ object MediaBridge {
     // =====================================================================
 
     fun playPause() {
+        if (usingNote && isRealTitle(noteTitle)) {
+            val c = controller
+            val pkg = runCatching { c?.packageName }.getOrNull()
+            if (pkg == FLYME_MUSIC) {
+                val tc = c?.transportControls
+                if (tc != null) {
+                    runCatching {
+                        val st = c.playbackState?.state
+                        if (st == PlaybackState.STATE_PLAYING) tc.pause() else tc.play()
+                    }
+                    return
+                }
+            }
+            appCtx?.let { openFlyme(it) }
+            return
+        }
         val tc = controller?.transportControls ?: return
         runCatching {
             val st = controller?.playbackState?.state
@@ -460,23 +844,33 @@ object MediaBridge {
 
     /** 打开当前播放器界面。成功返回 true，无会话或启动失败返回 false */
     fun openPlayer(ctx: Context): Boolean {
-        val c = controller ?: return false
-        val pi = runCatching { c.sessionActivity }.getOrNull()
-        if (pi != null) {
-            runCatching { pi.send() }.onSuccess {
-                Logx.d("媒体：通过 sessionActivity 打开播放器")
-                return true
+        val c = controller
+        val sessionTitle = runCatching { c?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) }.getOrNull()
+        val pkg = runCatching { c?.packageName }.getOrNull()
+        if (isRealTitle(sessionTitle) && !pkg.isNullOrBlank() && pkg != "com.android.bluetooth") {
+            val pi = runCatching { c?.sessionActivity }.getOrNull()
+            if (pi != null) {
+                runCatching { pi.send() }.onSuccess {
+                    Logx.d("媒体：通过 sessionActivity 打开 $pkg")
+                    return true
+                }
             }
+            return launchPackage(ctx, pkg)
         }
-        val pkg = runCatching { c.packageName }.getOrNull() ?: return false
-        return runCatching {
-            val i = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return@runCatching false
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            ctx.startActivity(i)
-            Logx.d("媒体：启动 $pkg")
-            true
-        }.getOrElse { false }
+        if (usingNote && isRealTitle(noteTitle)) return openFlyme(ctx)
+        if (pkg.isNullOrBlank()) return false
+        return launchPackage(ctx, pkg)
     }
+
+    private fun openFlyme(ctx: Context): Boolean = launchPackage(ctx, FLYME_MUSIC)
+
+    private fun launchPackage(ctx: Context, pkg: String): Boolean = runCatching {
+        val i = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return@runCatching false
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(i)
+        Logx.d("媒体：启动 $pkg")
+        true
+    }.getOrElse { false }
 
     val currentTitle: String get() = info.title
 

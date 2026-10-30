@@ -58,7 +58,7 @@ class DockIconView @JvmOverloads constructor(
         image.scaleType = ImageView.ScaleType.FIT_CENTER
         addView(image)
         if (iconRes != 0) image.setImageResource(iconRes)
-        background = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.bg_item_press)
+        setBackgroundResource(R.drawable.bg_item_press)
         isClickable = true
         isFocusable = false
         applyTint()
@@ -148,7 +148,7 @@ class DockValueView @JvmOverloads constructor(
             tv.includeFontPadding = false
             tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, size)
             tv.setTextColor(DockIconView.fgColor)
-            tv.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            tv.typeface = AppFont.bold(context)
             tv.gravity = Gravity.CENTER
             addView(tv, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         }
@@ -306,7 +306,7 @@ class DockMusicView @JvmOverloads constructor(
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-        background = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.bg_item_press)
+        setBackgroundResource(R.drawable.bg_item_press)
         isClickable = true
         setPadding((4 * textScale).toInt(), 0, (10 * textScale).toInt(), 0)
 
@@ -338,7 +338,7 @@ class DockMusicView @JvmOverloads constructor(
         tvTitle.includeFontPadding = false
         tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * textScale)
         tvTitle.setTextColor(DockIconView.fgColor)
-        tvTitle.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        tvTitle.typeface = AppFont.bold(context)
         tvTitle.maxLines = 1
         tvTitle.ellipsize = android.text.TextUtils.TruncateAt.END
         tvTitle.text = ""

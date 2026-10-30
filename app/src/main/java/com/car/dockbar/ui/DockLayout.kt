@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import kotlin.math.roundToInt
@@ -88,6 +89,9 @@ class DockLayout @JvmOverloads constructor(
     var showSeparators: Boolean = true
         set(v) { field = v; invalidate() }
 
+    /** 手指按下 / 松开 Dock。true = 正在操作，自动隐藏倒计时要停。 */
+    var onPressChanged: ((Boolean) -> Unit)? = null
+
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1f }
     private val rect = RectF()
@@ -104,13 +108,24 @@ class DockLayout @JvmOverloads constructor(
         set(v) { field = v; blurShader = v?.let { android.graphics.BitmapShader(it, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP) }; invalidate() }
 
     private var blurShader: android.graphics.Shader? = null
-    private val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = false }
+    private val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = true
+        alpha = 210
+    }
 
     private var lefts = IntArray(0)
     private var rights = IntArray(0)
 
     init {
         setWillNotDraw(false)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> onPressChanged?.invoke(true)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> onPressChanged?.invoke(false)
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     /**

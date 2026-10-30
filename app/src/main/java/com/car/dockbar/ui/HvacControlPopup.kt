@@ -100,7 +100,7 @@ class HvacControlPopup(private val ctx: Context) {
             text = "空调控制"
             setTextColor(DockIconView.popupFg)
             textSize = 16f
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -318,7 +318,7 @@ class HvacControlPopup(private val ctx: Context) {
             this.text = text
             setTextColor(DockIconView.popupFg)
             textSize = sp
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            typeface = AppFont.bold(ctx)
             gravity = Gravity.CENTER
             background = ContextCompat.getDrawable(ctx, R.drawable.bg_item_press)
             minHeight = dp(48)
@@ -339,7 +339,7 @@ class HvacControlPopup(private val ctx: Context) {
     private fun valueText(): TextView = TextView(ctx).apply {
         setTextColor(DockIconView.popupFg)
         textSize = 22f
-        setTypeface(null, android.graphics.Typeface.BOLD)
+        typeface = AppFont.bold(ctx)
         gravity = Gravity.CENTER
         minWidth = dp(80)
         includeFontPadding = false

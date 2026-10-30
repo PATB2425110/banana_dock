@@ -212,7 +212,7 @@ object VehicleController {
 
     /** 记录用户刚操作的风量目标（手动档 / AUTO） */
     private fun markPendingFan(level: Int, auto: Boolean) {
-        pendingFanLevel = if (auto) 0 else level
+        pendingFanLevel = level
         pendingFanAuto = auto
         pendingFanAt = android.os.SystemClock.elapsedRealtime()
     }
@@ -679,7 +679,7 @@ object VehicleController {
                 if (parsed !== base && pendingFanLevel >= 0 &&
                     android.os.SystemClock.elapsedRealtime() - pendingFanAt < PENDING_FAN_HOLD_MS
                 ) {
-                    val pLevel = if (parsed.fanAuto) 0 else parsed.fanLevel
+                    val pLevel = parsed.fanLevel
                     if (parsed.fanAuto != pendingFanAuto || pLevel != pendingFanLevel) {
                         Logx.d(
                             "风量回读忽略：乐观值=(auto=$pendingFanAuto,档=$pendingFanLevel) " +
@@ -1023,8 +1023,12 @@ object VehicleController {
             return
         }
         update(state.copy(steeringHeat = next))
-        val ok = writeChannel(ctx, "steering_heat", next)
-        scheduleRefresh(ctx)   // ★ v3.4：合并刷新（连点只跑最后一次）
+        val ctxBg = ctx
+        hal.execute {
+            val ok = writeChannel(ctxBg, "steering_heat", next)
+            Logx.d("写 方向盘加热 idx=$next → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
+        }
+        scheduleRefresh(ctx)
     }
 
     /**
@@ -1580,7 +1584,6 @@ object VehicleController {
         //   用户反馈「快速点击 D06 调温度会卡」→ 改成一行轻量日志（不再取栈）。
         //   （v1.4.90 要查的「副驾 + 被自动点了 2 次」未再复现；真要再查，
         //     把下面这行临时换成 getStackTraceString 即可。）
-        Logx.d("调温入口：${if (driver) "主驾" else "副驾"}${if (step > 0) " +" else " -"} state=${stateMachineStateName()}")
         val key = if (driver) "temp_driver" else "temp_passenger"
         val cur = (if (driver) state.driverTempC else state.passengerTempC)
             ?: Prefs.tempBase(ctx)
@@ -1815,38 +1818,26 @@ object VehicleController {
             val autoLevel = Prefs.fanAutoLevel(ctx)
                 .takeIf { it in 1..5 }
                 ?: ((manualNow + 1) * 5 / 9).coerceIn(1, 5)
-
-            // ★★ v1.4.84：**只写 AUTO 风量通道 0x10020200**，值用 osn_fan 的乱序映射。
-            //
-            // 权威依据（osn_fan = 系统 SystemUI 插件的实测实现）：
-            //  ```
-            //  fun isAutoFanMode(reg) = getFunctionValue(reg, 0x10020200, 0x8) != 0
-            //  mapAutoValueToLevel: 0x10020204→1档 0x10020201→2档 0x10020202→3档
-            //                        0x10020203→4档 0x10020205→5档
-            //  ```
-            //  ⇒ **写 0x10020200 的这 5 个值之一，就等于「进入 AUTO + 设定该档风道」**，
-            //    不需要先写 0x10020100|10（那个是推测，反而可能把车机带回手动 9 档）。
-            //  ⇒ 而且 AUTO 档位的值**顺序是乱的**，按 1→01 写会写错档。
-            val fAuto = VehicleChannels.funcOf(ctx, "fan_auto")
-            val zoneA = VehicleChannels.zoneOf(ctx, "fan_auto")
-            var okAuto = false
-            if (fAuto > 0) {
-                val value = fanAutoValue(autoLevel)
-                VehicleBridge.writeInt(fAuto, zoneA, value)
-                val back = VehicleBridge.readInt(fAuto, zoneA)
-                val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
-                Logx.d(
-                    "写 风量 AUTO（0x10020200 乱序映射）：档位=" + autoLevel +
-                    " value=0x" + value.toString(16) + " zone=0x" + zoneA.toString(16) +
-                    " 回读=0x" + (back?.toString(16) ?: "读不到") +
-                    " 回读档位=" + backLvl +
-                    (if (backLvl == autoLevel) "（✓ 一致）" else "")
-                )
-                if (backLvl == autoLevel) okAuto = true
+            update(state.copy(fanAuto = true, fanLevel = autoLevel, fanMax = 5))
+            markPendingFan(level = autoLevel, auto = true)
+            val ctxBg = ctx
+            hal.execute {
+                val fAuto = VehicleChannels.funcOf(ctxBg, "fan_auto")
+                val zoneA = VehicleChannels.zoneOf(ctxBg, "fan_auto")
+                if (fAuto > 0) {
+                    val value = fanAutoValue(autoLevel)
+                    VehicleBridge.writeInt(fAuto, zoneA, value)
+                    val back = VehicleBridge.readInt(fAuto, zoneA)
+                    val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
+                    Logx.d(
+                        "写 风量 AUTO（0x10020200 乱序映射）：档位=" + autoLevel +
+                        " value=0x" + value.toString(16) + " zone=0x" + zoneA.toString(16) +
+                        " 回读=0x" + (back?.toString(16) ?: "读不到") +
+                        " 回读档位=" + backLvl +
+                        (if (backLvl == autoLevel) "（✓ 一致）" else "")
+                    )
+                }
             }
-            update(state.copy(fanAuto = true, fanLevel = 0, fanMax = 5))
-            // ★ v3.13.18：AUTO 切换同样记快照（防止旧回读把 AUTO 状态顶掉）
-            markPendingFan(level = 0, auto = true)
         } else {
             val key = "fan_manual"
             val f = VehicleChannels.funcOf(ctx, key)
@@ -1855,25 +1846,37 @@ object VehicleController {
             //   注意：AUTO 状态下 state.fanLevel = 0（见 withRaw 的 AUTO 识别），
             //   所以不能再从 fanLevel 折算，直接用 3 档（中速）作为退出 AUTO 后的档位。
             val manual = if (state.fanAuto) 3 else state.fanLevel.coerceIn(1, 9)
-            val composite = (f and 0xFFFFFF00.toInt()) or manual
-            val zone = VehicleChannels.zoneOf(ctx, key)
-            val ok = VehicleBridge.writeInt(f, zone, composite)
             update(state.copy(fanAuto = false, fanLevel = manual, fanMax = 9))
-            // ★ v3.13.18：退出 AUTO 也记快照
             markPendingFan(level = manual, auto = false)
-            Logx.d(
-                "写 风量 手动：→ 手动 $manual 档 " +
-                "value=0x${composite.toString(16)} zone=0x${zone.toString(16)} → " +
-                if (ok) "OK" else "HAL 返回 false"
-            )
+            val ctxBg = ctx
+            hal.execute {
+                val key = "fan_manual"
+                val f = VehicleChannels.funcOf(ctxBg, key)
+                if (f <= 0) return@execute
+                val composite = (f and 0xFFFFFF00.toInt()) or manual
+                val zone = VehicleChannels.zoneOf(ctxBg, key)
+                val ok = VehicleBridge.writeInt(f, zone, composite)
+                Logx.d(
+                    "写 风量 手动：→ 手动 $manual 档 " +
+                    "value=0x${composite.toString(16)} zone=0x${zone.toString(16)} → " +
+                    if (ok) "OK" else "HAL 返回 false"
+                )
+            }
         }
     }
 
-    /** 风量 ±1 档（手动模式；若在 AUTO 下按 ±，自动切回手动并从此档开始调）。可降到 0 档（关闭） */
+    /** 风量 ±1。AUTO 开着时只改 AUTO 风道 1..5 档，不退回手动风速。 */
     fun fanStep(ctx: Context, delta: Int) {
-        val start = if (state.fanAuto) state.fanLevel.coerceAtLeast(1) else state.fanLevel
+        if (state.fanAuto) {
+            val cur = state.fanLevel.takeIf { it in 1..5 } ?: Prefs.fanAutoLevel(ctx).coerceIn(1, 5)
+            val next = (cur + delta).coerceIn(1, 5)
+            if (next == cur) return
+            setFanAutoLevel(ctx, next)
+            return
+        }
+        val start = state.fanLevel
         val next = (start + delta).coerceIn(0, 9)
-        if (next == start && !state.fanAuto) return
+        if (next == start) return
         if (Prefs.simulate(ctx)) {
             update(state.copy(fanLevel = next, fanAuto = false, fanMax = 9, connected = true))
             return
@@ -2261,26 +2264,27 @@ object VehicleController {
     fun setFanAutoLevel(ctx: Context, level: Int) {
         val l = level.coerceIn(1, 5)
         Prefs.setFanAutoLevel(ctx, l)
-        if (Prefs.simulate(ctx)) {
-            update(state.copy(fanAuto = true, fanLevel = l, fanMax = 5))
-            return
+        update(state.copy(fanAuto = true, fanLevel = l, fanMax = 5))
+        markPendingFan(level = l, auto = true)
+        if (Prefs.simulate(ctx)) return
+        val ctxBg = ctx
+        hal.execute {
+            val f = VehicleChannels.funcOf(ctxBg, "fan_auto")
+            if (f <= 0) {
+                Logx.e("AUTO 风道档位：通道未配置")
+                return@execute
+            }
+            val zone = VehicleChannels.zoneOf(ctxBg, "fan_auto")
+            val value = fanAutoValue(l)
+            val r = VehicleBridge.writeInt(f, zone, value)
+            val back = VehicleBridge.readInt(f, zone)
+            val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
+            Logx.d(
+                "设置 AUTO 风道档位：" + l + " 档 → value=0x" + value.toString(16) +
+                " zone=0x" + zone.toString(16) + " 返回=" + r +
+                " 回读档位=" + backLvl
+            )
         }
-        val f = VehicleChannels.funcOf(ctx, "fan_auto")
-        if (f <= 0) {
-            Logx.e("AUTO 风道档位：通道未配置")
-            return
-        }
-        val zone = VehicleChannels.zoneOf(ctx, "fan_auto")
-        val value = fanAutoValue(l)
-        val r = VehicleBridge.writeInt(f, zone, value)
-        val back = VehicleBridge.readInt(f, zone)
-        val backLvl = back?.let { fanAutoLevelOf(it) } ?: 0
-        Logx.d(
-            "设置 AUTO 风道档位：" + l + " 档 → value=0x" + value.toString(16) +
-            " zone=0x" + zone.toString(16) + " 返回=" + r +
-            " 回读档位=" + backLvl
-        )
-        if (backLvl > 0) update(state.copy(fanAuto = true, fanLevel = backLvl, fanMax = 5))
     }
 
     /** 把回读的循环状态转成文字（true=内循环 false=外循环 null=读不到） */
@@ -2531,8 +2535,11 @@ object VehicleController {
         // 与内外循环统一：一律写裸档位，失败才回退复合编码。
         // 乐观更新：图标立即响应
         update(set(state, next))
-        val ok = writeChannel(ctx, key, next)
-        Logx.d("写 $label idx=$next → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
+        val ctxBg = ctx
+        hal.execute {
+            val ok = writeChannel(ctxBg, key, next)
+            Logx.d("写 $label idx=$next → ${if (ok) "OK" else "FAIL（本地状态已更新）"}")
+        }
     }
 
     // =====================================================================
