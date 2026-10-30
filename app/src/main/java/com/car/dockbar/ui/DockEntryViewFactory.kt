@@ -164,7 +164,13 @@ class DockEntryViewFactory(
             )
 
             Builtin.SETTINGS -> BuiltEntry(
-                icon(R.drawable.ic_car, iconPx) {
+                icon(R.drawable.ic_car, iconPx, onLong = {
+                    Logx.d("D04 长按 → 打开 Dock 设置页")
+                    ctx.startActivity(
+                        Intent(ctx, MainActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    )
+                }) {
                     IntentLauncher.launch(
                         ctx, "车机设置",
                         IntentLauncher.settingsTarget(ctx),
