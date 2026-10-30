@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CarDockBar"
+rootProject.name = "banana_dock"
 include ':app'

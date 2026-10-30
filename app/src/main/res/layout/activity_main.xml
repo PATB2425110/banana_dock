@@ -143,7 +143,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
-                            android:text="没有通知使用权就读不到媒体会话，音乐卡片会显示「暂无播放」。点下面的按钮，在系统列表里打开 CarDockBar。"
+                            android:text="没有通知使用权就读不到媒体会话，音乐卡片会显示「暂无播放」。点下面的按钮，在系统列表里打开 banana_dock。"
                             android:textColor="@color/warn"
                             android:textSize="14sp"
                             android:visibility="gone" />

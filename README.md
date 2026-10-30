@@ -1,4 +1,4 @@
-# CarDockBar · 车机悬浮 Dock
+# banana_dock · 车机悬浮 Dock
 
 跑在安卓 9（API 28）车机上的悬浮 Dock。当前版本 **3.13.49**（versionCode 370）。
 
