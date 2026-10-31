@@ -2,6 +2,8 @@ package com.car.dockbar.ui
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
@@ -22,15 +24,41 @@ class ForegroundAppService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         val info = serviceInfo
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         info.notificationTimeout = 0
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        val gestures = runCatching {
+            val f = AccessibilityServiceInfo::class.java.getDeclaredField("mCanPerformGestures")
+            f.isAccessible = true
+            f.setBoolean(info, true)
+            f.getBoolean(info)
+        }.getOrDefault(false)
         serviceInfo = info
         Logx.d(
             "前台应用检测：无障碍服务已连接，可读窗口=" +
-                "${info.canRetrieveWindowContent}"
+                "${info.canRetrieveWindowContent} 可回放手势=$gestures"
         )
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
+    /** 把延伸区上的单击交回下面的应用。窗口要先改成不接收触摸，否则这一下还会打在自己身上。 */
+    fun tap(x: Float, y: Float): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return runCatching { dispatchGesture(gesture, null, null) }.getOrDefault(false)
+    }
+
+    companion object {
+        @Volatile
+        var instance: ForegroundAppService? = null
+            private set
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

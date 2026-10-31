@@ -591,6 +591,7 @@ object VehicleController {
         }
 
         update(s)
+        applyAmbientSeatOnce(c)
 
         // 真实模式诊断：把每个通道的原始值打到日志（每 2.5s 一次，不刷屏），
         // 车机没 adb 时据此核对编码即可校准，是修「数值不对」的关键依据。
@@ -1551,6 +1552,29 @@ object VehicleController {
     /** ★ v1.4.90：给调温调用栈日志用的当前状态描述 */
     private fun stateMachineStateName(): String =
         "connected=" + state.connected + " auto=" + state.fanAuto + " recirc=" + state.recircInside
+
+    /**
+     * 只在第一次读到有效车外温度时做一次：
+     * 高于 25℃ 开主驾通风 1 档；低于 15℃ 开主驾和副驾加热 1 档。
+     * 开关关掉的那一项跳过。15～25℃ 什么都不开，同样记为已处理。
+     */
+    private fun applyAmbientSeatOnce(ctx: Context) {
+        if (Prefs.ambientSeatDone(ctx)) return
+        val t = ambientTempC ?: return
+        Prefs.setAmbientSeatDone(ctx, true)
+        when {
+            t > 25f && Prefs.autoSeatVentHot(ctx) && state.seatVent <= 0 -> {
+                Logx.d("首次启动：车外 ${t}℃ > 25 → 主驾座椅通风 1 档")
+                setSeatVentLevel(ctx, 1)
+            }
+            t < 15f && Prefs.autoSeatHeatCold(ctx) -> {
+                Logx.d("首次启动：车外 ${t}℃ < 15 → 主驾/副驾座椅加热 1 档")
+                if (state.seatHeat <= 0) setSeatHeatLevel(ctx, 1)
+                if (state.seatHeatPassenger <= 0) setSeatHeatLevelPassenger(ctx, 1)
+            }
+            else -> Logx.d("首次启动：车外 ${t}℃，座椅保持原状")
+        }
+    }
 
     /** ★ v1.4.74：车外环境温度（ISensor 0x100B00） */
     @Volatile

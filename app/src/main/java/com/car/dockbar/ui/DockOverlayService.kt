@@ -20,8 +20,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
 import com.car.dockbar.App
 import com.car.dockbar.R
@@ -146,6 +149,10 @@ class DockOverlayService : Service() {
     private var gestureDownX = 0f
     private var gestureDownY = 0f
     private var gestureTracking = false
+    private var gestureFromExtension = false
+    private var gestureSwiped = false
+    private var gestureForwarding = false
+    private var gestureParams: WindowManager.LayoutParams? = null
 
     // --- 风向独立开关小弹窗（点击风向按钮弹出，5s 自动消失） ---
     private var airDirPop: AirDirectionPopup? = null
@@ -783,77 +790,118 @@ class DockOverlayService : Service() {
     private fun attachGestureStrip() {
         if (gestureAttached) return
         if (!Prefs.swipeShowDockEnabled(this)) return
-        val h = Prefs.swipeShowDockStripPx(this).coerceAtLeast(24)
         val density = resources.displayMetrics.density
         val pillH = (12 * density).toInt().coerceAtLeast(8)
         // 96dp 的基础上连续加宽两次 1.5 倍
         val pillW = (216 * density).toInt()
-        // 底部偏移：先上移 30px，再下移 10px，再下移 5px
+        // 底部偏移：先上移 30px，再下移 10px，再下移 5px。横条外观仍停在这个位置。
         val yOff = (6 * density).toInt() + 15
-        val v = View(this).apply {
+        val pill = View(this).apply {
             background = GradientDrawable().apply {
                 setColor(0x99FFFFFF.toInt())
                 setStroke((density).toInt().coerceAtLeast(1), android.graphics.Color.BLACK)
                 cornerRadius = pillH / 2f
             }
+            isClickable = false
         }
-        v.setOnTouchListener { _, ev ->
-            when (ev.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    gestureDownX = ev.rawX
-                    gestureDownY = ev.rawY
-                    gestureTracking = true
-                    true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (!gestureTracking) return@setOnTouchListener false
-                    val dy = gestureDownY - ev.rawY
-                    val dx = ev.rawX - gestureDownX
-                    if (dy > h * 1.2f && dy > Math.abs(dx) * 1.5f) {
-                        gestureTracking = false
-                        Logx.d("底部上滑手势 → 临时显示 Dock ${Prefs.swipeShowDockMs(this)}ms")
-                        stateMachine?.requestTempShow(Prefs.swipeShowDockMs(this))
-                        true
-                    } else {
-                        true
-                    }
-                }
-                android.view.MotionEvent.ACTION_UP,
-                android.view.MotionEvent.ACTION_CANCEL -> {
-                    gestureTracking = false
-                    // 唤起手势结束才开始倒计时，不从划过门槛的那一下算
-                    stateMachine?.onUserIdle()
-                    true
-                }
-                else -> false
+        // 窗口从屏幕底边拉到横条上沿。横条画在窗口顶部，下面 yOff 像素完全透明。
+        val v = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                onGestureTouch(ev, pillH)
+                return true
             }
+        }.apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            addView(pill, FrameLayout.LayoutParams(pillW, pillH, Gravity.TOP))
         }
         val p = WindowManager.LayoutParams(
             pillW,
-            pillH,
+            pillH + yOff,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // 窗口只有横条这么大。NOT_TOUCH_MODAL 让横条以外的触摸落到下面的应用。
-            // 点在横条上的那一下要消费掉，手指滑出横条后 MOVE 才会继续送到这里。
+            // 窗口以外的触摸交给下面的应用。延伸区里的单击在松手后另交回去。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             x = 0
-            y = yOff
+            y = 0
         }
         gestureView = v
+        gestureParams = p
         runCatching { wm.addView(v, p) }
             .onSuccess {
                 gestureAttached = true
-                Logx.d("底部手势条已挂载（高 ${h}px，上滑临时显示 Dock）")
+                Logx.d("底部手势条已挂载 横条 ${pillW}×${pillH} 距底 ${yOff}px，延伸到底边的区域透明")
             }
             .onFailure {
                 Logx.e("底部手势条挂载失败：${it.javaClass.simpleName} ${it.message}")
                 gestureAttached = false
+                gestureParams = null
             }
+    }
+
+    private fun onGestureTouch(ev: MotionEvent, pillH: Int) {
+        if (gestureForwarding) return
+        val threshold = Prefs.swipeShowDockStripPx(this).coerceAtLeast(24)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gestureDownX = ev.rawX
+                gestureDownY = ev.rawY
+                gestureTracking = true
+                gestureSwiped = false
+                gestureFromExtension = ev.y >= pillH
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!gestureTracking || gestureSwiped) return
+                val dy = gestureDownY - ev.rawY
+                val dx = ev.rawX - gestureDownX
+                if (dy > threshold * 1.2f && dy > kotlin.math.abs(dx) * 1.5f) {
+                    gestureTracking = false
+                    gestureSwiped = true
+                    Logx.d("底部上滑手势 → 临时显示 Dock ${Prefs.swipeShowDockMs(this)}ms")
+                    stateMachine?.requestTempShow(Prefs.swipeShowDockMs(this))
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val dx = ev.rawX - gestureDownX
+                val dy = ev.rawY - gestureDownY
+                val tap = kotlin.math.hypot(dx.toDouble(), dy.toDouble()) <
+                    ViewConfiguration.get(this).scaledTouchSlop
+                val forward = ev.actionMasked == MotionEvent.ACTION_UP &&
+                    gestureFromExtension && tap && !gestureSwiped
+                gestureTracking = false
+                if (forward) passThroughTap(gestureDownX, gestureDownY)
+                else stateMachine?.onUserIdle()
+            }
+        }
+    }
+
+    /** 延伸区上的单击。窗口先退出触摸，再把这一下交回下面的应用。 */
+    private fun passThroughTap(x: Float, y: Float) {
+        val svc = ForegroundAppService.instance
+        if (svc == null) {
+            Logx.d("点击透传失败：前台应用检测没开，延伸区上的单击送不下去")
+            return
+        }
+        gestureForwarding = true
+        setGestureTouchable(false)
+        val ok = svc.tap(x, y)
+        Logx.d("点击透传 ${x.toInt()},${y.toInt()} → $ok")
+        main.postDelayed({
+            setGestureTouchable(true)
+            gestureForwarding = false
+        }, 180)
+    }
+
+    private fun setGestureTouchable(touchable: Boolean) {
+        val p = gestureParams ?: return
+        val v = gestureView ?: return
+        val bit = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        p.flags = if (touchable) p.flags and bit.inv() else p.flags or bit
+        runCatching { wm.updateViewLayout(v, p) }
     }
 
     /** 卸载手势条（Dock 显示时） */
@@ -861,7 +909,9 @@ class DockOverlayService : Service() {
         if (!gestureAttached) return
         gestureView?.let { runCatching { wm.removeViewImmediate(it) } }
         gestureView = null
+        gestureParams = null
         gestureAttached = false
+        gestureForwarding = false
     }
 
     // =====================================================================

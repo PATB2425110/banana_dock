@@ -161,6 +161,21 @@ object Prefs {
     fun tempStep(ctx: Context) = sp(ctx).getFloat("temp_step_v2", 1.0f)
     fun setTempStep(ctx: Context, v: Float) = sp(ctx).edit().putFloat("temp_step_v2", v).apply()
 
+    /** 第一次读到车外温度时：高于 25℃ 是否打开主驾座椅通风。 */
+    fun autoSeatVentHot(ctx: Context) = sp(ctx).getBoolean("auto_seat_vent_hot", true)
+    fun setAutoSeatVentHot(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean("auto_seat_vent_hot", v).apply()
+
+    /** 第一次读到车外温度时：低于 15℃ 是否打开主驾和副驾座椅加热。 */
+    fun autoSeatHeatCold(ctx: Context) = sp(ctx).getBoolean("auto_seat_heat_cold", true)
+    fun setAutoSeatHeatCold(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean("auto_seat_heat_cold", v).apply()
+
+    /** 上面两条只判断一次。读到有效车外温度后置位，之后不再自动开。 */
+    fun ambientSeatDone(ctx: Context) = sp(ctx).getBoolean("ambient_seat_once", false)
+    fun setAmbientSeatDone(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean("ambient_seat_once", v).apply()
+
     /**
      * ★ v1.4.82：AUTO 风道的档位（1..5 档）。
      * 这台车有 5 档 AUTO 风道（反编译 AutoFanSpeedClick → 0x10020200，值 0x10020201..05）。

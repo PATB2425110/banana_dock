@@ -28,7 +28,7 @@ import com.car.dockbar.vehicle.VehicleController
  * 布局（按用户示意图）：
  *  左栏：温度档位竖排列表（15.5~28.5℃，步进 0.5），当前温度对应档位蓝字高亮，点某项直接设温；
  *  右栏 主驾：前挡加热 / 后挡加热 / 极速降温 / 极速升温 / 方向盘加热（档位）
- *  右栏 副驾：双温同步 / 车内温度 / 车外 AQI / 车内 AQI
+ *  右栏 副驾：双温同步 / 车内温度 / 高于25°通风 / 低于15°加热
  *
  * 遵循 [DockPopupChrome] 统一规范，风格与 [AirDirectionPopup] 一致：
  *  bg_card 圆角卡、贴着触发图标、点弹窗外面关闭、无 × 按钮、5 秒自动消失。
@@ -108,8 +108,8 @@ class TemperaturePopup(
     // 右栏 副驾
     private var btnDualSync: TextView? = null
     private var tvCabinTemp: TextView? = null
-    private var tvAqiAmbient: TextView? = null
-    private var tvAqiIndoor: TextView? = null
+    private var btnVentHot: TextView? = null
+    private var btnHeatCold: TextView? = null
 
     var onDismissed: (() -> Unit)? = null
 
@@ -281,14 +281,22 @@ class TemperaturePopup(
             }
             // ── [P06] 车内温度 ─────────────────────
             tvCabinTemp = valueBox("车内温度")
-            // ── [P07] 车外 AQI ───────────────────
-            tvAqiAmbient = valueBox("车外 AQI")
-            // ── [P08] 车内 AQI ───────────────────
-            tvAqiIndoor = valueBox("车内 AQI")
+            // ── [P07] 高于 25℃ 自动开主驾通风 ────────
+            btnVentHot = funcBtn("高于25°通风") {
+                Prefs.setAutoSeatVentHot(ctx, !Prefs.autoSeatVentHot(ctx))
+                render(VehicleController.state)
+                resetTimer()
+            }
+            // ── [P08] 低于 15℃ 自动开主/副驾加热 ────
+            btnHeatCold = funcBtn("低于15°加热") {
+                Prefs.setAutoSeatHeatCold(ctx, !Prefs.autoSeatHeatCold(ctx))
+                render(VehicleController.state)
+                resetTimer()
+            }
             rightCol.addView(btnDualSync, funcLp())
             rightCol.addView(tvCabinTemp, funcLp())
-            rightCol.addView(tvAqiAmbient, funcLp())
-            rightCol.addView(tvAqiIndoor, funcLp())
+            rightCol.addView(btnVentHot, funcLp())
+            rightCol.addView(btnHeatCold, funcLp())
         }
         body.addView(rightCol, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -403,6 +411,16 @@ class TemperaturePopup(
                 it.text = if (sync) "双温同步 开" else "双温同步 关"
                 it.setActive(sync)
             }
+            btnVentHot?.let {
+                val on = Prefs.autoSeatVentHot(ctx)
+                it.text = if (on) "高于25°通风 开" else "高于25°通风 关"
+                it.setActive(on)
+            }
+            btnHeatCold?.let {
+                val on = Prefs.autoSeatHeatCold(ctx)
+                it.text = if (on) "低于15°加热 开" else "低于15°加热 关"
+                it.setActive(on)
+            }
         }
     }
 
@@ -412,19 +430,7 @@ class TemperaturePopup(
         SensorBridge.init(ctx)
         val cabin = SensorBridge.readFloat(SensorBridge.TEMP_INDOOR)
         tvCabinTemp?.text = "车内温度 " + if (cabin == null) "--" else String.format("%.1f°", cabin)
-        // ★ 空气质量：优先 AQI，取不到退回 PM2.5（μg/m³）。
-        //   本车 AQI 通道返回 Float.MAX_VALUE（无数据哨兵），见 SensorBridge.readFloat 注释。
-        val amb = SensorBridge.readAirQuality(indoor = false)
-        tvAqiAmbient?.text = if (amb == null) "车外 AQI --"
-        else "车外 ${amb.second} ${fmtAir(amb.first, amb.second)}"
-        val indoor = SensorBridge.readAirQuality(indoor = true)
-        tvAqiIndoor?.text = if (indoor == null) "车内 AQI --"
-        else "车内 ${indoor.second} ${fmtAir(indoor.first, indoor.second)}"
     }
-
-    /** AQI 是整数指数；PM2.5 是 μg/m³，保留一位小数 */
-    private fun fmtAir(v: Float, unit: String): String =
-        if (unit == "AQI") String.format("%.0f", v) else String.format("%.1f", v)
 
     /** 档位显示：超出可调范围显示 "--" */
     private fun fmtTemp(t: Float): String =
