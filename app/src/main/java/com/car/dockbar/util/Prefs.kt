@@ -16,6 +16,10 @@ object Prefs {
     fun overlayEnabled(ctx: Context) = sp(ctx).getBoolean("overlay_enabled", true)
     fun setOverlayEnabled(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("overlay_enabled", v).apply()
 
+    /** 曾经读到过前台检测已开启。系统重启把无障碍从名单里拿掉之后，凭这个标记写回去。 */
+    fun accKeep(ctx: Context) = sp(ctx).getBoolean("acc_keep", false)
+    fun setAccKeep(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("acc_keep", v).apply()
+
     /** Dock 固定贴屏幕底部。保留旧键兼容，但不再提供顶部/底部切换。 */
     fun dockAtBottom(ctx: Context) = true
     fun setDockAtBottom(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("dock_at_bottom", true).apply()

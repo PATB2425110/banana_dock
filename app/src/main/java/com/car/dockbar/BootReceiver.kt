@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 import com.car.dockbar.ui.DockOverlayService
 import com.car.dockbar.ui.LyricOverlayService
+import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
 
@@ -18,6 +19,8 @@ class BootReceiver : BroadcastReceiver() {
             a == Intent.ACTION_MY_PACKAGE_REPLACED ||
             a == Intent.ACTION_USER_PRESENT
         ) {
+            runCatching { AccessibilityKeep.restore(context) }
+                .onFailure { Logx.e("BootReceiver 写回无障碍失败", it) }
             if (Prefs.overlayEnabled(context)) {
                 Logx.d("BootReceiver: $a → 启动 Dock 服务")
                 runCatching {

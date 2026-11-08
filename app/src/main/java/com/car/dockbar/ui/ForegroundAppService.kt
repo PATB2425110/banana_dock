@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.Logx
 
 /**
@@ -36,6 +37,7 @@ class ForegroundAppService : AccessibilityService() {
             f.getBoolean(info)
         }.getOrDefault(false)
         serviceInfo = info
+        AccessibilityKeep.restore(this)
         Logx.d(
             "前台应用检测：无障碍服务已连接，可读窗口=" +
                 "${info.canRetrieveWindowContent} 可回放手势=$gestures"

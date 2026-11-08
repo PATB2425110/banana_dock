@@ -37,6 +37,7 @@ import com.car.dockbar.media.LyricMonitor
 import com.car.dockbar.media.MediaBridge
 import com.car.dockbar.model.AppDrawerApp
 import com.car.dockbar.model.AppDrawerApps
+import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.IntentLauncher
 import com.car.dockbar.util.LogUploader
@@ -1986,22 +1987,15 @@ class MainActivity : AppCompatActivity() {
         }.onFailure { Logx.e("打开无障碍设置失败", it) }
     }
 
-    /** 无障碍（前台应用检测）是否已开启 */
-    private fun isAccessibilityEnabled(): Boolean {
-        val expected = "$packageName/${ForegroundAppService::class.java.name}"
-        return runCatching {
-            val enabled = Settings.Secure.getString(
-                contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            )
-            enabled?.split(":")?.any { it.equals(expected, ignoreCase = true) } == true
-        }.getOrDefault(false)
-    }
+    /** 无障碍（前台应用检测）是否已开启。短类名和全类名都算开着。 */
+    private fun isAccessibilityEnabled(): Boolean = AccessibilityKeep.isEnabled(this)
 
     /**
      * ★ v1.5.6：「已开启 / 未开启」这几个字加粗（其余保持普通字重）。
      * 整行字号在 XML 里已经放到 24sp（原来 12sp，放大 2 倍）。
      */
     private fun refreshAccStatus() {
+        AccessibilityKeep.restore(this)
         val on = isAccessibilityEnabled()
         val cur = ForegroundTracker.currentPackage
         val state = if (on) "已开启" else "未开启"

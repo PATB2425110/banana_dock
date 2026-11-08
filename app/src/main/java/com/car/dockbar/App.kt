@@ -1,6 +1,7 @@
 package com.car.dockbar
 
 import android.app.Application
+import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.CrashHandler
 import com.car.dockbar.util.LogUploader
 import com.car.dockbar.util.Logx
@@ -131,6 +132,8 @@ class App : Application() {
         CrashHandler.install(this)
 
         Logx.d("Application 启动（SDK_INT=${android.os.Build.VERSION.SDK_INT}）")
+        runCatching { AccessibilityKeep.install(this) }
+            .onFailure { Logx.e("写回无障碍失败", it) }
         Logx.d("启动补传：$report")
         Logx.d(
             "日志上传：${if (Prefs.logUploadEnabled(this)) "已启用 → ${LogUploader.endpoint(this)}" else "未启用"}" +
