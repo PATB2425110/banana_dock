@@ -11,13 +11,16 @@ captures/
 output.json
 output-metadata.json
 
-# ===== 签名文件（绝对不能进仓库）=====
+# ===== 签名文件（仅允许下方明确列出的公开测试密钥）=====
 *.jks
 *.keystore
 *.p12
 *.pfx
 signing.properties
 keystore.properties
+
+# Public, disposable CI test key only. Never add production keys here.
+!/.github/signing/ci-test.jks
 
 # ===== 日志与临时文件 =====
 *.log
