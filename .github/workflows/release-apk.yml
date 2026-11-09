@@ -110,7 +110,11 @@ jobs:
           keytool -list -keystore "$RUNNER_TEMP/release.keystore" \
             -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > /dev/null
 
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # The default includes obsolete 'tools', which sdkmanager no longer provides.
+          packages: platform-tools
 
       - name: Install project SDK and NDK
         run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;28.2.13676358'
