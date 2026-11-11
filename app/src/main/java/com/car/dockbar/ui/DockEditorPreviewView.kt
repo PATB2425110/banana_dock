@@ -1,7 +1,7 @@
 package com.car.dockbar.ui
 
-import com.car.dockbar.dock.BindKind
 import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockSnapshots
 import com.car.dockbar.dock.DockMetrics
 import com.car.dockbar.dock.SilentDockHost
 import com.car.dockbar.dock.airDirectionIcon
@@ -81,45 +81,14 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
                 }
             }
         }
-        val state = VehicleController.state
         // Match the live Dock's palette without changing its global foreground colors.
         val darkIcons = Color.red(DockIconView.fgColor) < 128
         items.forEach { entry ->
             val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
             val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)
-            val built = mounted
-            val value = built.valueView ?: built.view as? DockValueView
-            when (mounted.bindKind) {
-                BindKind.TEMP_DRIVER -> value?.renderTemp(state.driverTempC ?: Prefs.lastDriverTempC(ctx), muted = !state.acOn)
-                BindKind.TEMP_PASSENGER -> value?.renderTemp(state.passengerTempC ?: Prefs.lastPassengerTempC(ctx), muted = !state.acOn)
-                BindKind.FAN -> value?.renderFan(state.fanLevel, state.fanAuto)
-                BindKind.VOLUME -> (built.view as? VolumeDockButton)?.setLevel(CabinVolume.read(ctx, CabinVolume.MEDIA).value)
-                BindKind.RECIRC -> (built.view as? DockIconView)?.setIcon(
-                    if (state.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer)
-                BindKind.AIR -> (built.view as? DockIconView)?.setIcon(airDirectionIcon(state.airDirection))
-                BindKind.DEFROST_FRONT -> (built.view as? DockIconView)?.setActive(state.defrostFront)
-                BindKind.DEFROST_REAR -> (built.view as? DockIconView)?.setActive(state.defrostRear)
-                BindKind.SEAT_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(levelIcon("seatHeat", state.seatHeat, darkIcons))
-                    setActive(state.seatHeat > 0)
-                }
-                BindKind.STEERING_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(levelIcon("steeringHeat", state.steeringHeat, darkIcons))
-                    setActive(state.steeringHeat > 0)
-                }
-                BindKind.VENT -> (built.view as? DockIconView)?.apply {
-                    setIcon(levelIcon("vent", state.seatVent, darkIcons))
-                    setActive(state.seatVent > 0)
-                }
-                BindKind.MUSIC -> (built.view as? DockMusicView)?.apply {
-                    val info = MediaBridge.info
-                    if (info.hasSession) render(info.title, info.artist, info.art, info.isPlaying) else renderEmpty()
-                }
-                else -> Unit
-            }
-            stripInteractions(built.view)
-            layout.addItem(built.view, built.span, built.separator, built.fixedWidthPx,
-                built.flexMinPx, built.flexMaxPx)
+            mounted.widget.bind(mounted, DockSnapshots.capture(ctx, darkIcons))
+            layout.addItem(mounted.view, mounted.span, mounted.separator, mounted.fixedWidthPx,
+                mounted.flexMinPx, mounted.flexMaxPx)
         }
         layout.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
@@ -157,17 +126,6 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         return if (crop != null && crop.width() > 0 && crop.height() > 0)
             Bitmap.createBitmap(image, crop.left, crop.top, crop.width(), crop.height()) else image
     }
-
-    private fun stripInteractions(view: View) {
-        view.setOnClickListener(null)
-        view.setOnLongClickListener(null)
-        view.setOnTouchListener(null)
-        view.isClickable = false
-        view.isLongClickable = false
-        if (view is ViewGroup) repeat(view.childCount) { stripInteractions(view.getChildAt(it)) }
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { updateTarget() }
 
     private fun updateTarget() {
         val image = bitmap ?: return

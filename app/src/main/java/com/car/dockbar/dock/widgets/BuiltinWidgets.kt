@@ -3,11 +3,14 @@ package com.car.dockbar.dock.widgets
 import com.car.dockbar.dock.BindKind
 import com.car.dockbar.dock.DockAction
 import com.car.dockbar.dock.DockMetrics
+import com.car.dockbar.dock.DockSnapshot
 import com.car.dockbar.dock.DockWidget
 import com.car.dockbar.dock.GestureBinding
 import com.car.dockbar.dock.HitTargets
 import com.car.dockbar.dock.MountedEntry
 import com.car.dockbar.dock.WidgetSpec
+import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.levelIcon
 
 import android.content.Context
 import android.view.Gravity
@@ -86,6 +89,9 @@ private fun iconWidget(
         builtin, iconFor(builtin.action), bindKind, lockSpan,
         iconScale = iconScale, preserveColors = preserveColors,
     )
+    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
+        (mounted.view as? DockIconView)?.let { paintIcon(it, spec.bindKind, snapshot) }
+    }
     override fun defaultGestures() = gestures
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val size = (iconPx * spec.iconScale).toInt().coerceAtLeast(1)
@@ -100,6 +106,9 @@ private fun valueWidget(
     bindKind: BindKind,
 ): DockWidget = object : DockWidget {
     override val spec = spec(builtin, iconFor(builtin.action), bindKind)
+    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
+        mounted.valueView?.let { paintValue(it, spec.bindKind, snapshot) }
+    }
     override fun defaultGestures() = gestures
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val text = Prefs.textScale(ctx)
@@ -122,6 +131,9 @@ private fun comboWidget(
         builtin, iconFor(builtin.action), bindKind,
         fixedWidthPx = fixedWidthPx, arrowPx = arrowPx,
     )
+    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
+        mounted.valueView?.let { paintValue(it, spec.bindKind, snapshot) }
+    }
     override fun defaultGestures() = linkedMapOf(
         HitTargets.MINUS to tap(minus),
         HitTargets.PLUS to tap(plus),
@@ -176,6 +188,9 @@ private fun mounted(
 private object VolumeWidget : DockWidget {
     override val spec = spec(Builtin.VOLUME, R.drawable.ic_volume, BindKind.VOLUME)
     override fun defaultGestures() = root(tap(DockAction.ShowPopup("volume")))
+    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
+        (mounted.view as? VolumeDockButton)?.setLevel(snapshot.volumeLevel)
+    }
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val view = VolumeDockButton(ctx, iconPx)
         return mounted(this, entry, view, linkedMapOf(HitTargets.ROOT to view), null)
@@ -192,6 +207,14 @@ private object MusicWidget : DockWidget {
         HitTargets.ROOT to tap(DockAction.OpenPlayer),
         HitTargets.PLAY to tapLong(DockAction.PlayPause, DockAction.MediaNext),
     )
+    override fun bind(mounted: MountedEntry, snapshot: DockSnapshot) {
+        val music = mounted.view as? DockMusicView ?: return
+        if (snapshot.mediaHasSession) {
+            music.render(snapshot.mediaTitle, snapshot.mediaArtist, snapshot.mediaArt, snapshot.mediaPlaying)
+        } else {
+            music.renderEmpty()
+        }
+    }
     override fun create(ctx: Context, entry: DockEntry, iconPx: Int): MountedEntry {
         val view = DockMusicView(
             ctx, Prefs.dockHeightPx(ctx), Prefs.textScale(ctx), Prefs.iconScale(ctx),
@@ -277,4 +300,38 @@ internal object BuiltinWidgets {
         iconWidget(Builtin.DEFROST_REAR, root(tap(DockAction.ToggleDefrostRear)), BindKind.DEFROST_REAR),
         iconWidget(Builtin.STEERING_HEAT, root(tapLong(DockAction.LevelBump("steeringHeat", "down"), DockAction.LevelBump("steeringHeat", "up"))), BindKind.STEERING_HEAT, preserveColors = true),
     )
+}
+
+private fun paintIcon(view: DockIconView, kind: BindKind, snapshot: DockSnapshot) {
+    when (kind) {
+        BindKind.RECIRC -> view.setIcon(
+            if (snapshot.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer
+        )
+        BindKind.AIR -> view.setIcon(airDirectionIcon(snapshot.airDirection))
+        BindKind.DEFROST_FRONT -> view.setActive(snapshot.defrostFront)
+        BindKind.DEFROST_REAR -> view.setActive(snapshot.defrostRear)
+        BindKind.LYRIC -> view.setActive(snapshot.lyricOn)
+        BindKind.VENT -> {
+            view.setIcon(levelIcon("vent", snapshot.seatVent, snapshot.darkIcons))
+            view.setActive(snapshot.seatVent > 0)
+        }
+        BindKind.SEAT_HEAT -> {
+            view.setIcon(levelIcon("seatHeat", snapshot.seatHeat, snapshot.darkIcons))
+            view.setActive(snapshot.seatHeat > 0)
+        }
+        BindKind.STEERING_HEAT -> {
+            view.setIcon(levelIcon("steeringHeat", snapshot.steeringHeat, snapshot.darkIcons))
+            view.setActive(snapshot.steeringHeat > 0)
+        }
+        else -> Unit
+    }
+}
+
+private fun paintValue(view: DockValueView, kind: BindKind, snapshot: DockSnapshot) {
+    when (kind) {
+        BindKind.TEMP_DRIVER -> view.renderTemp(snapshot.driverTempC, muted = !snapshot.acOn)
+        BindKind.TEMP_PASSENGER -> view.renderTemp(snapshot.passengerTempC, muted = !snapshot.acOn)
+        BindKind.FAN -> view.renderFan(snapshot.fanLevel, snapshot.fanAuto)
+        else -> Unit
+    }
 }

@@ -1,8 +1,9 @@
 package com.car.dockbar.ui
 
 import com.car.dockbar.dock.airDirectionIcon
-import com.car.dockbar.dock.BindKind
 import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockSnapshots
+import com.car.dockbar.dock.MountedEntry
 import com.car.dockbar.dock.DockHost
 import com.car.dockbar.dock.levelIcon
 
@@ -126,23 +127,10 @@ class DockOverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
 
     // --- 各控件引用（同一控件可能被用户重复添加，用列表保存） ---
-    private val tempDriverViews = mutableListOf<DockValueView>()
-    private val tempPassengerViews = mutableListOf<DockValueView>()
-    private val fanViews = mutableListOf<DockValueView>()
-    private val musicViews = mutableListOf<DockMusicView>()
-    private val lyricViews = mutableListOf<DockIconView>()
-    private val recircViews = mutableListOf<DockIconView>()
-    private val ventViews = mutableListOf<DockIconView>()
-    private val seatHeatViews = mutableListOf<DockIconView>()
-    private val airViews = mutableListOf<DockIconView>()
-    /** ★ v1.5.11 #13：前挡加热开关（默认不在 Dock，用户手动添加才有） */
-    private val defrostFrontViews = mutableListOf<DockIconView>()
-    /** ★ v3.1：后挡除霜 / 方向盘加热（同样默认不在 Dock） */
-    private val defrostRearViews = mutableListOf<DockIconView>()
-    private val steeringHeatViews = mutableListOf<DockIconView>()
-    private val volumeViews = mutableListOf<VolumeDockButton>()
-    private val mediaLevelListener: (Int) -> Unit = { level ->
-        volumeViews.forEach { it.setLevel(level) }
+    private val mountedEntries = mutableListOf<MountedEntry>()
+
+    private val mediaLevelListener: (Int) -> Unit = { _ ->
+        main.post { rebind() }
     }
 
     // --- 显示/隐藏状态机（对齐吉利 oneOS Dock 的 dockstate 包） ---
@@ -210,7 +198,7 @@ class DockOverlayService : Service() {
                 val level = runCatching {
                     CabinVolume.read(this@DockOverlayService, CabinVolume.MEDIA).value
                 }.getOrNull()
-                if (level != null) main.post { volumeViews.forEach { it.setLevel(level) } }
+                if (level != null) main.post { rebind() }
             }
             refreshLyricIcons()
             main.postDelayed(this, REFRESH_INTERVAL_MS)
@@ -236,9 +224,7 @@ class DockOverlayService : Service() {
 
     /** 「歌词」按钮点亮状态跟随歌词悬浮窗的实际运行状态 */
     private fun refreshLyricIcons() {
-        if (lyricViews.isEmpty()) return
-        val on = LyricOverlayService.alive && LyricOverlayService.attached
-        lyricViews.forEach { it.setActive(on) }
+        rebind()
     }
 
     private val vehicleListener: (VehicleController.State) -> Unit = { st ->
@@ -432,20 +418,8 @@ class DockOverlayService : Service() {
     }
 
     private fun clearBindings() {
-        tempDriverViews.clear()
-        tempPassengerViews.clear()
-        fanViews.clear()
-        musicViews.clear()
-        lyricViews.clear()
-        recircViews.clear()
-        ventViews.clear()
-        seatHeatViews.clear()
-        airViews.clear()
-        defrostFrontViews.clear()
-        defrostRearViews.clear()
-        steeringHeatViews.clear()
-        volumeViews.clear()
-        lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
+        mountedEntries.clear()
+                lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
         animating = false
     }
 
@@ -515,24 +489,7 @@ class DockOverlayService : Service() {
                 mounted.view, mounted.span, mounted.separator,
                 mounted.fixedWidthPx, mounted.flexMinPx, mounted.flexMaxPx
             )
-            when (mounted.bindKind) {
-                // ★ 组合控件（− 值 +）的数值 View 在 mounted.valueView 里；
-                //   独立值条目兜底直接取 mounted.view
-                BindKind.TEMP_DRIVER -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { tempDriverViews += it }
-                BindKind.TEMP_PASSENGER -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { tempPassengerViews += it }
-                BindKind.FAN -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { fanViews += it }
-                BindKind.MUSIC -> musicViews += mounted.view as DockMusicView
-                BindKind.LYRIC -> lyricViews += mounted.view as DockIconView
-                BindKind.RECIRC -> recircViews += mounted.view as DockIconView
-                BindKind.VENT -> ventViews += mounted.view as DockIconView
-                BindKind.SEAT_HEAT -> seatHeatViews += mounted.view as DockIconView
-                BindKind.AIR -> airViews += mounted.view as DockIconView
-                BindKind.DEFROST_FRONT -> defrostFrontViews += mounted.view as DockIconView
-                BindKind.DEFROST_REAR -> defrostRearViews += mounted.view as DockIconView
-                BindKind.STEERING_HEAT -> steeringHeatViews += mounted.view as DockIconView
-                BindKind.VOLUME -> volumeViews += mounted.view as VolumeDockButton
-                BindKind.NONE -> {}
-            }
+            mountedEntries += mounted
         }
         Logx.d("Dock 条目数：${entries.size}（含自定义应用）")
 
@@ -1371,7 +1328,6 @@ class DockOverlayService : Service() {
         // 真实车控数据可能带来异常值，渲染层必须兜底，绝不能让前台服务闪退
         runCatching { bindVehicle(VehicleController.state) }
         runCatching { bindMedia(MediaBridge.info) }
-        volumeViews.forEach { it.setLevel(it.shownLevel) }
         Logx.d("反色：${if (darkText) "白字（暗背景）" else "黑字（亮背景）"}")
     }
 
@@ -1463,61 +1419,21 @@ class DockOverlayService : Service() {
     // 数据绑定
     // =====================================================================
 
-    private fun bindVehicle(st: VehicleController.State) {
-        // 空调关闭时仍显示最后一次有效设定温度，只将整组温度字样灰显。
-        // State 尚未从车机读取（或安全模式跳过车控初始化）时直接从本地历史值恢复。
-        val driverTemp = st.driverTempC ?: Prefs.lastDriverTempC(this)
-        val passengerTemp = st.passengerTempC ?: Prefs.lastPassengerTempC(this)
-        tempDriverViews.forEach { it.renderTemp(driverTemp, muted = !st.acOn) }
-        tempPassengerViews.forEach { it.renderTemp(passengerTemp, muted = !st.acOn) }
-        fanViews.forEach { it.renderFan(st.fanLevel, st.fanAuto) }
-        // 内外循环：内/外两种图标（车内环形箭头 / 外部箭头进车厢）
-        // ★ v1.5.13：改用系统 Dock 的矢量（ic_ac_cycle_inner / _outer），不再自绘
-        recircViews.forEach {
-            it.setIcon(
-                if (st.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer
-            )
-        }
-        // ★ v3.1：主驾座椅通风 —— 改用系统 Dock 的 ic_seat_feng_left_01/02/03_normal + _off_normal
-        // ★ v3.3：白天模式（亮背景）换深色版，否则白座椅掉在白底上看不见
-        ventViews.forEach {
-            it.setIcon(levelIcon("vent", st.seatVent, !darkText))
-            it.setActive(st.seatVent > 0)
-        }
-        // ★ v3.1：主驾座椅加热 —— 改成**按档位换图**（热浪数量 1/2/3 跟着档位走），
-        //   之前是固定一张 3 档图，所以热浪永远只显示 3 条。
-        // ★ v3.3：白天模式换深色版
-        seatHeatViews.forEach {
-            it.setIcon(levelIcon("seatHeat", st.seatHeat, !darkText))
-            it.setActive(st.seatHeat > 0)
-        }
-        // 风向：7 种组合（吹脸/吹脚/吹前挡 及其组合）各自点亮对应箭头
-        // ★ v1.5.13：改用系统 Dock 的 ic_blowing_* 静态矢量（按位掩码选图），不再自绘
-        airViews.forEach { it.setIcon(airDirectionIcon(st.airDirection)) }
-        // ★ v1.5.11 #13：前挡加热 —— 开启时点亮强调色
-        defrostFrontViews.forEach { it.setActive(st.defrostFront) }
-        // ★ v3.1：后挡除霜 —— 开启时点亮强调色
-        defrostRearViews.forEach { it.setActive(st.defrostRear) }
-        // ★ v3.1：方向盘加热 —— 按档位换图（0=关 1/2/3 档图标不同）
-        // ★ v3.3：白天模式换深色版
-        steeringHeatViews.forEach {
-            it.setIcon(levelIcon("steeringHeat", st.steeringHeat, !darkText))
-            it.setActive(st.steeringHeat > 0)
-        }
-        onAcStateChanged(st)
-        // ★ v1.4.44：长按主驾温度（切 AC）时不再显示 Dock 上方的状态小字（用户要求取消）；
-        //   状态小字只保留「长按副驾温度切双温同步」这一处触发
+    private fun rebind() {
+        if (mountedEntries.isEmpty()) return
+        val snapshot = DockSnapshots.capture(this, darkIcons = !darkText)
+        mountedEntries.forEach { it.widget.bind(it, snapshot) }
     }
 
-    // （v1.4.46：Dock 上方状态小字已全部移除——refreshLongPressLabel 连同触发点一并删除）
+    private fun bindVehicle(st: VehicleController.State) {
+        rebind()
+        onAcStateChanged(st)
+    }
 
     private fun bindMedia(mi: MediaBridge.MediaInfo) {
-        if (musicViews.isEmpty()) return
-        musicViews.forEach { m ->
-            if (!mi.hasSession) m.renderEmpty()
-            else m.render(mi.title, mi.artist, mi.art, mi.isPlaying)
-        }
+        rebind()
     }
+
 
     // =====================================================================
     // 广播
