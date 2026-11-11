@@ -58,7 +58,7 @@ object DockCatalog {
     }
 
     private fun attach(mounted: MountedEntry, host: DockHost) {
-        val merged = GestureMaps.merge(mounted.widget.defaultGestures(), null)
+        val merged = GestureMaps.merge(mounted.widget.defaultGestures(), mounted.entry.gestures)
         for ((target, hit) in mounted.hits) {
             val binding = merged[target] ?: continue
             if (binding.tap == null && binding.longPress == null && binding.doubleTap == null) continue

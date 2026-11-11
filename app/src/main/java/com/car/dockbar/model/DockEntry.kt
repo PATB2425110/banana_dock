@@ -1,6 +1,8 @@
 package com.car.dockbar.model
 
 import android.content.Context
+import com.car.dockbar.dock.GestureMaps
+import com.car.dockbar.dock.GesturePatch
 import com.car.dockbar.util.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,7 +25,9 @@ data class DockEntry(
     /** kind=app 的 Activity 全名，可为空（空则用 LAUNCHER intent 启动） */
     val cls: String = "",
     /** 占几个等分槽位（音乐卡片默认 3） */
-    val span: Int = 1
+    val span: Int = 1,
+    /** 缺省表示沿用控件自己的单击、长按、双击。 */
+    val gestures: GesturePatch? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -32,6 +36,7 @@ data class DockEntry(
         put("label", label)
         put("cls", cls)
         put("span", span)
+        gestures?.let { put("gestures", GestureMaps.toJson(it)) }
     }
 
     companion object {
@@ -41,7 +46,8 @@ data class DockEntry(
             action = o.optString("action"),
             label = o.optString("label"),
             cls = o.optString("cls", ""),
-            span = o.optInt("span", 1).coerceIn(1, 6)
+            span = o.optInt("span", 1).coerceIn(1, 6),
+            gestures = GestureMaps.parsePatch(o.optJSONObject("gestures"))
         )
     }
 }

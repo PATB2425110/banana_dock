@@ -2,8 +2,11 @@ package com.car.dockbar.dock
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.car.dockbar.model.DockEntry
 
 class GestureMapTest {
     private val base = mapOf(
@@ -60,5 +63,39 @@ class GestureMapTest {
     @Test
     fun nullJsonIsNullPatch() {
         assertNull(GestureMaps.parsePatch(null))
+    }
+
+    @Test
+    fun oldEntryJsonHasNoGesturePatch() {
+        val entry = DockEntry.fromJson(JSONObject("""{"id":"b_home","kind":"builtin","action":"home","label":"返回桌面","span":1}"""))
+        assertNull(entry.gestures)
+        assertEquals("home", entry.action)
+    }
+
+    @Test
+    fun malformedGesturesKeepTheEntry() {
+        val entry = DockEntry.fromJson(JSONObject("""{"id":"b_home","kind":"builtin","action":"home","label":"返回桌面","span":1,"gestures":"nope"}"""))
+        assertNull(entry.gestures)
+        assertEquals("返回桌面", entry.label)
+    }
+
+    @Test
+    fun gesturePatchRoundTrips() {
+        val raw = JSONObject(
+            """{"id":"b_home","kind":"builtin","action":"home","label":"返回桌面","span":1,"gestures":{"root":{"doubleTap":null,"longPress":{"type":"openRecents"}}}}"""
+        )
+        val entry = DockEntry.fromJson(raw)
+        val root = entry.gestures!!.byTarget.getValue(HitTargets.ROOT)
+        assertTrue(root.getValue(Gesture.DOUBLE_TAP) is ActionSlot.Clear)
+        assertEquals(DockAction.OpenRecents, (root.getValue(Gesture.LONG_PRESS) as ActionSlot.Set).action)
+        assertFalse(root.containsKey(Gesture.TAP))
+        val again = DockEntry.fromJson(JSONObject(entry.toJson().toString()))
+        assertEquals(entry.gestures, again.gestures)
+    }
+
+    @Test
+    fun absentPatchIsOmittedFromJson() {
+        val entry = DockEntry("b_home", "builtin", "home", "返回桌面")
+        assertFalse(entry.toJson().has("gestures"))
     }
 }
