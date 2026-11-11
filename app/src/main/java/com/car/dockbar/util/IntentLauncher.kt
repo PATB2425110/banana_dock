@@ -252,7 +252,7 @@ object IntentLauncher {
      * 若用户填了其它包名，以用户配置为准。
      */
     /**
-     * ★ v1.4.97 #4：双击 D01 打开最近任务（后台应用列表）。
+     * ★ v1.4.97 #4：长按 D01 打开最近任务（后台应用列表）。
      *
      * 1.4.96 的做法是 `getLaunchIntentForPackage("com.geely.recents")` —— **它返回 null**，
      * 因为 recents 这类系统 App **没有 CATEGORY_LAUNCHER 入口**（由系统直接起，不在桌面显示），

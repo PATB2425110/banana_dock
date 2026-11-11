@@ -27,7 +27,7 @@ data class DockEntry(
     val cls: String = "",
     /** 占几个等分槽位（音乐卡片默认 3） */
     val span: Int = 1,
-    /** 缺省表示沿用控件自己的单击、长按、双击。 */
+    /** 缺省表示沿用控件自己的单击、长按。 */
     val gestures: GesturePatch? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
@@ -75,7 +75,7 @@ enum class Builtin(
     val hidden: Boolean = false
 ) {
     // ── [D01] 返回桌面 ─────────────────────────
-    HOME("home", "返回桌面", 1, false, "单击返回桌面 · 双击打开最近任务（后台应用列表）"),
+    HOME("home", "返回桌面", 1, false, "单击返回桌面 · 长按打开最近任务（后台应用列表）"),
     // ── [D02] 音乐信息卡 ────────────────────────
     // ★ v3.13.8：宽度与 span 解耦 —— 弹性区间 295~500px（总宽减去全部固定项），span 仅元数据
     MUSIC("music", "音乐信息", 3, true, "封面 + 歌名 + 播放键，宽度自适应 295~500px"),

@@ -378,7 +378,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<EditText>(R.id.etAirPkg).setText(Prefs.airDirPkg(this))
         findViewById<EditText>(R.id.etAirCls).setText(Prefs.airDirCls(this))
         findViewById<EditText>(R.id.etMusicPkg).setText(Prefs.musicPkg(this))
-        // ── [S34] 最近任务包名（D01 双击打开）────────
+        // ── [S34] 最近任务包名（D01 长按打开）────────
         findViewById<EditText>(R.id.etRecentsPkg).setText(Prefs.recentsPkg(this))
 
 

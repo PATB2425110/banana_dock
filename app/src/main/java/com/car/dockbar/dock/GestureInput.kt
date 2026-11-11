@@ -1,6 +1,5 @@
 package com.car.dockbar.dock
 
-import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -17,32 +16,18 @@ object GestureInput {
         view.isLongClickable = false
         val slop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
         val longPressMs = ViewConfiguration.getLongPressTimeout().toLong()
-        var single: Runnable? = null
         var tracking = false
         var longFired = false
-        lateinit var resolver: GestureResolver
-        val longRunnable = Runnable { resolver.onLongTimeout() }
-        resolver = GestureResolver(
+        val resolver = GestureResolver(
             binding = binding,
-            longPressMs = longPressMs,
             slopPx = slop,
-            clock = { SystemClock.elapsedRealtime() },
-            schedule = { delay, block ->
-                single?.let { view.removeCallbacks(it) }
-                val posted = Runnable { block() }
-                single = posted
-                view.postDelayed(posted, delay)
-            },
-            cancelScheduled = {
-                single?.let { view.removeCallbacks(it) }
-                single = null
-            },
             emit = { action ->
                 if (action == binding.longPress && tracking) longFired = true
                 onAction(action)
             },
             onFingerSettled = onSettled,
         )
+        val longRunnable = Runnable { resolver.onLongTimeout() }
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -81,7 +66,6 @@ object GestureInput {
             override fun onViewDetachedFromWindow(v: View) {
                 tracking = false
                 v.removeCallbacks(longRunnable)
-                single?.let { v.removeCallbacks(it) }
                 resolver.onCancel()
             }
         })

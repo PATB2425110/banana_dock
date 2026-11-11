@@ -12,15 +12,12 @@ object HitTargets {
     val all = setOf(ROOT, MINUS, VALUE, PLUS, PLAY)
 }
 
-enum class Gesture { TAP, LONG_PRESS, DOUBLE_TAP }
+enum class Gesture { TAP, LONG_PRESS }
 
 data class GestureBinding(
     val tap: DockAction? = null,
     val longPress: DockAction? = null,
-    val doubleTap: DockAction? = null,
-) {
-    val doubleWindowMs: Long get() = if (doubleTap != null) 300L else 0L
-}
+)
 
 sealed class ActionSlot {
     data class Set(val action: DockAction) : ActionSlot()
@@ -33,7 +30,6 @@ object GestureMaps {
     private val gestureNames = mapOf(
         "tap" to Gesture.TAP,
         "longPress" to Gesture.LONG_PRESS,
-        "doubleTap" to Gesture.DOUBLE_TAP,
     )
 
     fun merge(base: Map<String, GestureBinding>, patch: GesturePatch?): Map<String, GestureBinding> {
@@ -44,7 +40,6 @@ object GestureMaps {
             val current = out[target] ?: GestureBinding()
             var tap = current.tap
             var longPress = current.longPress
-            var doubleTap = current.doubleTap
             for ((gesture, slot) in slots) {
                 val action = when (slot) {
                     is ActionSlot.Set -> slot.action
@@ -53,10 +48,9 @@ object GestureMaps {
                 when (gesture) {
                     Gesture.TAP -> tap = action
                     Gesture.LONG_PRESS -> longPress = action
-                    Gesture.DOUBLE_TAP -> doubleTap = action
                 }
             }
-            out[target] = current.copy(tap = tap, longPress = longPress, doubleTap = doubleTap)
+            out[target] = current.copy(tap = tap, longPress = longPress)
         }
         return out
     }
@@ -93,7 +87,6 @@ object GestureMaps {
                 val name = when (gesture) {
                     Gesture.TAP -> "tap"
                     Gesture.LONG_PRESS -> "longPress"
-                    Gesture.DOUBLE_TAP -> "doubleTap"
                 }
                 when (slot) {
                     is ActionSlot.Clear -> targetObj.put(name, JSONObject.NULL)

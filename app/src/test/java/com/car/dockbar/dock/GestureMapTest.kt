@@ -12,7 +12,6 @@ class GestureMapTest {
     private val base = mapOf(
         HitTargets.ROOT to GestureBinding(
             tap = DockAction.GoHome,
-            doubleTap = DockAction.OpenRecents,
         )
     )
 
@@ -28,19 +27,17 @@ class GestureMapTest {
         )
         val merged = GestureMaps.merge(base, patch)[HitTargets.ROOT]!!
         assertEquals(DockAction.GoHome, merged.tap)
-        assertEquals(DockAction.OpenRecents, merged.doubleTap)
         assertEquals(DockAction.OpenRecents, merged.longPress)
     }
 
     @Test
-    fun nullDoubleTapClearsItAndDropsTheWindow() {
+    fun storedDoubleTapIsIgnored() {
         val patch = GestureMaps.parsePatch(
-            JSONObject("""{"root":{"doubleTap":null}}""")
+            JSONObject("""{"root":{"doubleTap":{"type":"openRecents"},"longPress":{"type":"goHome"}}}""")
         )
         val merged = GestureMaps.merge(base, patch)[HitTargets.ROOT]!!
-        assertNull(merged.doubleTap)
         assertEquals(DockAction.GoHome, merged.tap)
-        assertEquals(0L, merged.doubleWindowMs)
+        assertEquals(DockAction.GoHome, merged.longPress)
     }
 
     @Test
@@ -82,13 +79,12 @@ class GestureMapTest {
     @Test
     fun gesturePatchRoundTrips() {
         val raw = JSONObject(
-            """{"id":"b_home","kind":"builtin","action":"home","label":"返回桌面","span":1,"gestures":{"root":{"doubleTap":null,"longPress":{"type":"openRecents"}}}}"""
+            """{"id":"b_home","kind":"builtin","action":"home","label":"返回桌面","span":1,"gestures":{"root":{"tap":null,"longPress":{"type":"openRecents"}}}}"""
         )
         val entry = DockEntry.fromJson(raw)
         val root = entry.gestures!!.byTarget.getValue(HitTargets.ROOT)
-        assertTrue(root.getValue(Gesture.DOUBLE_TAP) is ActionSlot.Clear)
+        assertTrue(root.getValue(Gesture.TAP) is ActionSlot.Clear)
         assertEquals(DockAction.OpenRecents, (root.getValue(Gesture.LONG_PRESS) as ActionSlot.Set).action)
-        assertFalse(root.containsKey(Gesture.TAP))
         val again = DockEntry.fromJson(JSONObject(entry.toJson().toString()))
         assertEquals(entry.gestures, again.gestures)
     }

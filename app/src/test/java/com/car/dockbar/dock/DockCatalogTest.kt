@@ -34,14 +34,10 @@ class DockCatalogTest {
         val home = DockCatalog.of("home")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.GoHome, home.tap)
         assertEquals(DockAction.OpenRecents, home.longPress)
-        assertNull(home.doubleTap)
-        assertEquals(0L, home.doubleWindowMs)
 
         val recirc = DockCatalog.of("recirc")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.ToggleRecirc, recirc.tap)
         assertNull(recirc.longPress)
-        assertNull(recirc.doubleTap)
-        assertEquals(0L, recirc.doubleWindowMs)
     }
 
     @Test
@@ -94,7 +90,7 @@ class DockCatalogTest {
             assertEquals(gestures, describe(DockCatalog.of(action)!!.defaultGestures()))
         }
         DockCatalog.builtins().forEach { widget ->
-            assertTrue(widget.spec.action, widget.defaultGestures().values.any { it.tap != null || it.longPress != null || it.doubleTap != null })
+            assertTrue(widget.spec.action, widget.defaultGestures().values.any { it.tap != null || it.longPress != null })
         }
     }
 
@@ -103,7 +99,6 @@ class DockCatalogTest {
             buildString {
                 append(target).append(':').append(code(binding.tap))
                 if (binding.longPress != null) append("/long:").append(code(binding.longPress))
-                if (binding.doubleTap != null) append("/double:").append(code(binding.doubleTap))
             }
         }
 
