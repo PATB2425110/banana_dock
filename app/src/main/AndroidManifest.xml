@@ -79,7 +79,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true"
             android:launchMode="standard"
-            android:theme="@style/Theme.CarDockBar">
+            android:theme="@style/Theme.CarDockBar.Settings">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -91,7 +91,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:label="@string/app_name"
-            android:theme="@style/Theme.CarDockBar" />
+            android:theme="@style/Theme.CarDockBar.Settings" />
 
         <service
             android:name=".ui.DockOverlayService"

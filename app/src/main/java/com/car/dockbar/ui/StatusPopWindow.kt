@@ -57,7 +57,7 @@ class StatusPopWindow(private val ctx: Context) {
                 val box = LinearLayout(ctx).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    background = ContextCompat.getDrawable(ctx, R.drawable.bg_card)
+                    background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
                     // ★ v1.4.91：整体放大 1.5 倍（用户要求）。
                     //   padding 与字号同步放大，视觉上整个弹窗正好是 1.5 倍，
                     //   不会出现"字大字边小"的失衡感。

@@ -4,15 +4,15 @@
     android:id="@+id/rootRow"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_page"
+    android:background="@drawable/bg_settings_page"
     android:orientation="horizontal">
 
     <!-- ================= 左栏：入口按钮（代码里动态生成） ================= -->
     <ScrollView
         android:id="@+id/svNav"
-        android:layout_width="232dp"
+        android:layout_width="242dp"
         android:layout_height="match_parent"
-        android:background="@color/nav_bg"
+        android:background="@android:color/transparent"
         android:fillViewport="true"
         android:scrollbars="none">
 
@@ -29,7 +29,7 @@
     <View
         android:layout_width="1dp"
         android:layout_height="match_parent"
-        android:background="#33FFFFFF" />
+        android:background="#12FFFFFF" />
 
     <!-- ================= 右栏：当前页内容 ================= -->
     <ScrollView
@@ -37,17 +37,18 @@
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
-        android:fillViewport="true">
+        android:fillViewport="true"
+        android:scrollbarStyle="insideOverlay">
 
     <LinearLayout
         android:id="@+id/llRoot"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingBottom="10dp"
-        android:paddingTop="50dp">
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingBottom="28dp"
+        android:paddingTop="32dp">
 
         <!-- ============ 悬浮 Dock 栏 ============ -->
         <LinearLayout
@@ -56,7 +57,7 @@
             android:layout_height="wrap_content"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="24dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -109,7 +110,7 @@
                             android:layout_marginTop="10dp"
                             android:background="@drawable/bg_button_primary"
                             android:text="@string/btn_grant_overlay"
-                            android:textColor="#FFFFFF"
+                            android:textColor="?attr/primaryButtonText"
                             android:textSize="15sp" />
                     </LinearLayout>
 
@@ -155,7 +156,7 @@
                             android:layout_marginTop="10dp"
                             android:background="@drawable/bg_button_primary"
                             android:text="@string/btn_grant_notif"
-                            android:textColor="#FFFFFF"
+                            android:textColor="?attr/primaryButtonText"
                             android:textSize="15sp" />
                     </LinearLayout>
 
@@ -201,7 +202,7 @@
                             android:layout_marginTop="10dp"
                             android:background="@drawable/bg_button_primary"
                             android:text="@string/btn_grant_accessibility"
-                            android:textColor="#FFFFFF"
+                            android:textColor="?attr/primaryButtonText"
                             android:textSize="15sp" />
                     </LinearLayout>
                 </LinearLayout>
@@ -260,7 +261,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="宽"
+                                android:text="宽度 · px"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp" />
 
@@ -288,7 +289,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="高"
+                                android:text="高度 · px"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp" />
 
@@ -316,7 +317,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="距边"
+                                android:text="距屏幕边缘 · px"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp" />
 
@@ -355,8 +356,8 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
                         android:background="@drawable/bg_button_primary"
-                        android:text="应用"
-                        android:textColor="#FFFFFF"
+                        android:text="应用布局"
+                        android:textColor="?attr/primaryButtonText"
                         android:textSize="16sp" />
                 </LinearLayout>
             </LinearLayout>
@@ -431,14 +432,6 @@
                 android:text="显示分组竖分隔线"
                 android:textColor="@color/text_primary" />
 
-            <Button
-                android:id="@+id/btnApplyAppearance"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_button_primary"
-                android:text="应用外观"
-                android:textColor="#FFFFFF" />
         </LinearLayout>
 
         <!-- ============ 跳转入口（已按用户要求隐藏） ============ -->
@@ -656,7 +649,7 @@
                 android:layout_marginTop="10dp"
                 android:background="@drawable/bg_button_primary"
                 android:text="@string/btn_apply_entries"
-                android:textColor="#FFFFFF" />
+                android:textColor="?attr/primaryButtonText" />
         </LinearLayout>
 
 
@@ -715,7 +708,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_button_primary"
                     android:text="@string/btn_read_all"
-                    android:textColor="#FFFFFF"
+                    android:textColor="?attr/primaryButtonText"
                     android:textSize="12sp" />
 
                 <Button
@@ -770,7 +763,7 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <ScrollView
+            <com.car.dockbar.ui.LogTailScrollView
                 android:id="@+id/svLog"
                 android:layout_width="match_parent"
                 android:layout_height="260dp"
@@ -784,7 +777,7 @@
                     android:layout_height="wrap_content"
                     android:textColor="@color/text_secondary"
                     android:textSize="10sp" />
-            </ScrollView>
+            </com.car.dockbar.ui.LogTailScrollView>
         </LinearLayout>
 
         <!-- ============ 子界面入口 ============ -->
@@ -904,7 +897,7 @@
                     android:paddingTop="10dp"
                     android:paddingBottom="10dp"
                     android:text="＋ 从已安装应用中选择"
-                    android:textColor="#FFFFFF"
+                    android:textColor="?attr/primaryButtonText"
                     android:textSize="14sp" />
             </LinearLayout>
 

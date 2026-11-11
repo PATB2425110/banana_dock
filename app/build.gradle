@@ -14,8 +14,8 @@ android {
         applicationId "com.car.dockbar"
         minSdk 28
         targetSdk 34
-        versionCode 374
-        versionName "3.13.53"
+        versionCode 434
+        versionName "4.0"
         resConfigs "zh", "en"
 
         ndk {
@@ -75,7 +75,8 @@ android {
 
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            outputFileName = "CarDockBar-${variant.buildType.name}.apk"
+            outputFileName = variant.buildType.name == 'release' ?
+                    "Banana_Dock-${variant.versionName}.apk" : "Banana_Dock-${variant.versionName}-debug.apk"
         }
     }
 }

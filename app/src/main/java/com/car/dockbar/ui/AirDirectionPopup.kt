@@ -102,7 +102,7 @@ class AirDirectionPopup(private val ctx: Context) {
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_card)
+            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
             val pad = dp(14)
             setPadding(pad, dp(10), pad, dp(10))
         }

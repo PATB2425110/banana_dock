@@ -69,7 +69,7 @@ class DockStatusLabel(private val ctx: Context) {
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = ContextCompat.getDrawable(ctx, R.drawable.bg_card)
+            background = ContextCompat.getDrawable(ctx, R.drawable.bg_dock_popup_card)
             val pad = dp(12)
             setPadding(pad, dp(5), pad, dp(5))
         }

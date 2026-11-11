@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="settingsRuntimeBadge" type="id" />
+    <item name="settingsNavStatus" type="id" />
+    <item name="settingsNavVersion" type="id" />
+    <item name="settingsResidentSelectedCount" type="id" />
+    <item name="settingsResidentSearch" type="id" />
+    <item name="settingsResidentSystemScroll" type="id" />
+    <item name="settingsResidentPersonalScroll" type="id" />
+    <item name="settingsBgModeRow" type="id" />
+    <item name="settingsFollowNightRow" type="id" />
+    <item name="settingsDayTransparencyRow" type="id" />
+    <item name="settingsNightTransparencyRow" type="id" />
+    <item name="settingsOverlayControls" type="id" />
+    <item name="settingsGradientPreview" type="id" />
+    <item name="settingsDockEntriesPage" type="id" />
+    <item name="settingsManageDockEntries" type="id" />
+    <item name="settingsEntryCount" type="id" />
+    <item name="settingsQuickAppsSummary" type="id" />
+    <item name="settingsManageQuickApps" type="id" />
+    <item name="settingsQuickAppsGrid" type="id" />
+    <item name="settingsPopupSwitchRow" type="id" />
+    <item name="settingsPopupDurationRow" type="id" />
+    <item name="settingsFadeDurationRow" type="id" />
+    <item name="settingsAutoFanRow" type="id" />
+</resources>

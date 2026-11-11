@@ -29,6 +29,7 @@ import androidx.core.app.NotificationCompat
 import com.car.dockbar.App
 import com.car.dockbar.R
 import com.car.dockbar.config.VehicleChannels
+import com.car.dockbar.media.CabinVolume
 import com.car.dockbar.media.MediaBridge
 import com.car.dockbar.model.DockEntries
 import com.car.dockbar.model.DockEntry
@@ -133,6 +134,10 @@ class DockOverlayService : Service() {
     /** ★ v3.1：后挡除霜 / 方向盘加热（同样默认不在 Dock） */
     private val defrostRearViews = mutableListOf<DockIconView>()
     private val steeringHeatViews = mutableListOf<DockIconView>()
+    private val volumeViews = mutableListOf<VolumeDockButton>()
+    private val mediaLevelListener: (Int) -> Unit = { level ->
+        volumeViews.forEach { it.setLevel(level) }
+    }
 
     // --- 显示/隐藏状态机（对齐吉利 oneOS Dock 的 dockstate 包） ---
     private var stateMachine: DockStateMachine? = null
@@ -161,6 +166,7 @@ class DockOverlayService : Service() {
     private var appDrawerPop: AppDrawerPopup? = null
     private var airQualityPop: TemperaturePopup? = null
     private var seatPopup: SeatPopup? = null
+    private var volumePop: VolumePopup? = null
 
     // --- Dock 上方常驻状态小字（显示长按类功能的当前状态，如双温同步） ---
     private var statusLabel: DockStatusLabel? = null
@@ -195,6 +201,10 @@ class DockOverlayService : Service() {
                     .onFailure { Logx.e("车控刷新异常", it) }
                 runCatching { MediaBridge.refresh(this@DockOverlayService) }
                     .onFailure { Logx.e("媒体刷新异常", it) }
+                val level = runCatching {
+                    CabinVolume.read(this@DockOverlayService, CabinVolume.MEDIA).value
+                }.getOrNull()
+                if (level != null) main.post { volumeViews.forEach { it.setLevel(level) } }
             }
             refreshLyricIcons()
             main.postDelayed(this, REFRESH_INTERVAL_MS)
@@ -251,6 +261,7 @@ class DockOverlayService : Service() {
         registerReceiver()
         VehicleController.addListener(vehicleListener)
         MediaBridge.addListener(mediaListener)
+        CabinVolume.addMediaShownListener(mediaLevelListener)
 
         if (!canDrawOverlay()) {
             lastError = "没有悬浮窗权限（Settings.canDrawOverlays=false）"
@@ -381,6 +392,7 @@ class DockOverlayService : Service() {
         stopWork()
         VehicleController.removeListener(vehicleListener)
         MediaBridge.removeListener(mediaListener)
+        CabinVolume.removeMediaShownListener(mediaLevelListener)
         MediaBridge.stop()
         runCatching {
             if (receiver != null) {
@@ -404,6 +416,8 @@ class DockOverlayService : Service() {
         airQualityPop = null
         seatPopup?.destroy()
         seatPopup = null
+        volumePop?.destroy()
+        volumePop = null
         statusLabel?.destroy()
         statusLabel = null
         stateMachine?.dispose()
@@ -424,6 +438,7 @@ class DockOverlayService : Service() {
         defrostFrontViews.clear()
         defrostRearViews.clear()
         steeringHeatViews.clear()
+        volumeViews.clear()
         lastAcState = null   // 重建后重置首帧判定，避免旧状态误触发弹窗
         animating = false
     }
@@ -499,6 +514,7 @@ class DockOverlayService : Service() {
             onShowAirQuality = { v, isDriver -> showAirQualityPopup(v, isDriver) },
             onToggleAcLong = { toggleAcFromDock() },
             onShowSeatPopup = { v -> showSeatPopup(v) },
+            onShowVolume = { v -> showVolumePopup(v) },
             iconScale = iconScale
         )
         val entries: List<DockEntry> = DockEntries.load(ctx)
@@ -523,6 +539,7 @@ class DockOverlayService : Service() {
                 BindKind.DEFROST_FRONT -> defrostFrontViews += built.view as DockIconView
                 BindKind.DEFROST_REAR -> defrostRearViews += built.view as DockIconView
                 BindKind.STEERING_HEAT -> steeringHeatViews += built.view as DockIconView
+                BindKind.VOLUME -> volumeViews += built.view as VolumeDockButton
                 BindKind.NONE -> {}
             }
         }
@@ -1141,6 +1158,19 @@ class DockOverlayService : Service() {
      * ★ v1.4.34：座椅按钮单击 → 座椅弹窗（主驾通风/加热档位，激活蓝色）。
      * 不再进座椅设置 App。位置贴着触发图标、点外面关闭、无 × 按钮（统一规范）。
      */
+    private fun showVolumePopup(anchor: View? = null) {
+        pauseAutoHide()
+        val pop = volumePop ?: VolumePopup(this).also {
+            it.onDismissed = { stateMachine?.onUserIdle() }
+            volumePop = it
+        }
+        if (pop.isShowing) pop.hide() else if (!DockPopupChrome.shouldSuppressShow()) pop.show(anchor)
+        else Logx.d("音量弹窗：刚被点外面关掉，忽略本次点击")
+        if (stateMachine?.state == DockState.HIDDEN) {
+            stateMachine?.requestTempShow(6000L)
+        }
+    }
+
     private fun showSeatPopup(anchor: View? = null) {
         pauseAutoHide()
         val pop = seatPopup ?: SeatPopup(this).also {
@@ -1235,17 +1265,15 @@ class DockOverlayService : Service() {
                 layout.blurBitmap = null
             }
             BgMode.BLUR -> {
+                BehindBlur.clear(layout)
                 layout.bgColors = null
                 layout.bgColor = 0
                 layout.blurBitmap = null
-                val night = Prefs.bgFollowNight(this) && Prefs.isNightMode(this)
-                val tint = if (night) 0x33000000 else 0x33FFFFFF
-                BehindBlur.apply(
-                    layout,
-                    Prefs.blurRadius(this) * 4,
-                    Prefs.cornerRadiusPx(this).toFloat(),
-                    tint
-                )
+                // Transparent base + gray layer + independent compositing transparency.
+                // No white overlay, capture, textures or actual backdrop blur.
+                layout.background = GrayOverlayDrawable(
+                    Prefs.overlayGrayLevel(this), Prefs.overlayTransparency(this),
+                    Prefs.cornerRadiusPx(this).toFloat())
             }
         }
     }
@@ -1352,6 +1380,7 @@ class DockOverlayService : Service() {
         // 真实车控数据可能带来异常值，渲染层必须兜底，绝不能让前台服务闪退
         runCatching { bindVehicle(VehicleController.state) }
         runCatching { bindMedia(MediaBridge.info) }
+        volumeViews.forEach { it.setLevel(it.shownLevel) }
         Logx.d("反色：${if (darkText) "白字（暗背景）" else "黑字（亮背景）"}")
     }
 

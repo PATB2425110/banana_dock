@@ -22,7 +22,7 @@ import com.car.dockbar.vehicle.VehicleController
  * 生成出来的 Dock 条目 View 附带"数据绑定类型"，
  * 服务据此在车辆信号/媒体信息变化时刷新对应控件。
  */
-enum class BindKind { NONE, TEMP_DRIVER, TEMP_PASSENGER, FAN, MUSIC, LYRIC, RECIRC, VENT, SEAT_HEAT, AIR, DEFROST_FRONT, DEFROST_REAR, STEERING_HEAT }
+enum class BindKind { NONE, TEMP_DRIVER, TEMP_PASSENGER, FAN, MUSIC, LYRIC, RECIRC, VENT, SEAT_HEAT, AIR, DEFROST_FRONT, DEFROST_REAR, STEERING_HEAT, VOLUME }
 
 data class BuiltEntry(
     val view: View,
@@ -66,6 +66,8 @@ class DockEntryViewFactory(
     private val onToggleAcLong: () -> Unit,
     /** ★ 座椅按钮单击 → 座椅弹窗（通风/加热档位） */
     private val onShowSeatPopup: (View) -> Unit,
+    /** 音量按钮单击 → 媒体 / 导航音量面板 */
+    private val onShowVolume: (View) -> Unit,
     iconScale: Float = Prefs.iconScale(ctx),
     private val textScale: Float = Prefs.textScale(ctx)
 ) {
@@ -409,6 +411,15 @@ class DockEntryViewFactory(
                     true
                 }
                 BuiltEntry(v, 1, sep, BindKind.LYRIC)
+            }
+
+            Builtin.VOLUME -> {
+                val v = VolumeDockButton(ctx, iconPx)
+                v.setOnClickListener {
+                    onInteraction()
+                    onShowVolume(v)
+                }
+                BuiltEntry(v, sp, sep, BindKind.VOLUME)
             }
         }
     }

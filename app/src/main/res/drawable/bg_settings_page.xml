@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape><solid android:color="@color/settings_page" /></shape>
+    </item>
+    <!-- Full-height sidebar surface, including the 128px Dock clearance. -->
+    <item android:width="242dp" android:gravity="left|fill_vertical">
+        <shape><solid android:color="@color/settings_nav" /></shape>
+    </item>
+</layer-list>

@@ -808,6 +808,14 @@ object Prefs {
     fun setBlurRadius(ctx: Context, v: Int) =
         sp(ctx).edit().putInt("blur_radius", v.coerceIn(0, 24)).apply()
 
+    /** 透明叠层试验：灰度 0 = 黑，100 = 白；透明度 100 = 完全透明。 */
+    fun overlayGrayLevel(ctx: Context) = sp(ctx).getInt("overlay_gray_level", 50).coerceIn(0, 100)
+    fun setOverlayGrayLevel(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("overlay_gray_level", v.coerceIn(0, 100)).apply()
+    fun overlayTransparency(ctx: Context) = sp(ctx).getInt("overlay_transparency", 50).coerceIn(0, 100)
+    fun setOverlayTransparency(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("overlay_transparency", v.coerceIn(0, 100)).apply()
+
     /**
      * 纯色模式下的底色 ARGB（整条一个颜色）。
      */

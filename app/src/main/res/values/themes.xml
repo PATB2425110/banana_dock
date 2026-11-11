@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.CarDockBar" parent="Theme.AppCompat.NoActionBar">
+        <item name="surfaceCardColor">#1B1D22</item>
+        <item name="surfaceCardStroke">#2A2E36</item>
+        <item name="surfaceCardRadius">14dp</item>
+        <item name="surfaceFieldColor">#2A2E36</item>
+        <item name="surfaceFieldRadius">8dp</item>
+        <item name="primaryButtonColor">#3D8BFF</item>
+        <item name="primaryButtonRadius">8dp</item>
+        <item name="primaryButtonText">#FFFFFF</item>
         <item name="colorPrimary">@color/accent</item>
         <item name="colorAccent">@color/accent</item>
         <item name="android:windowBackground">@color/bg_page</item>

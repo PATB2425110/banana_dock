@@ -56,10 +56,16 @@ class App : Application() {
         //   用户会觉得「装了新包连车控都没了」。
         val ver = appVersion(this)
         val versionChanged = Prefs.lastVersion(this) != ver
+        // This release only reorganizes settings UI: preserve user switches and safety level.
+        val preserveUiUpgrade = versionChanged && Prefs.lastVersion(this).isNotBlank() &&
+            (ver.startsWith("3.13.105(") || ver.startsWith("3.13.106(") || ver.startsWith("3.13.107(") ||
+                ver.startsWith("3.13.108(") || ver.startsWith("3.13.109(") || ver.startsWith("3.13.110(") ||
+                ver.startsWith("3.13.111(") || ver.startsWith("3.13.112(") || ver.startsWith("4.0("))
+        if (preserveUiUpgrade) Prefs.setLastVersion(this, ver)
         val rawStreak = LogUploader.updateCrashStreak(this, LogUploader.lastReportHadCrash)
         // 升级 / 首次安装用重置后的 0。熔断必须看这个值，不能看重置前的计数，
         // 否则「恢复全功能」写完，下面的熔断又会把温度监听立刻关回去。
-        val streak = if (versionChanged) {
+        val streak = if (versionChanged && !preserveUiUpgrade) {
             LogUploader.resetCrashStreak(this)
             Prefs.setSafeLevel(this, 0)
             Prefs.setVehicleWriteEnabled(this, true)

@@ -115,6 +115,52 @@ class DockIconView @JvmOverloads constructor(
 }
 
 /**
+ * 音量按钮：喇叭缩到原来的 0.8，右下角用剩下的 0.2 显示媒体档位。
+ */
+class VolumeDockButton(context: Context, iconPx: Int) : FrameLayout(context) {
+    private val icon = DockIconView(
+        context,
+        R.drawable.ic_volume,
+        (iconPx * 0.8f).roundToInt().coerceAtLeast(1)
+    )
+    private val level = TextView(context).apply {
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, iconPx * 0.2f * 2f)
+        setTextColor(DockIconView.fgColor)
+        typeface = AppFont.bold(context)
+        includeFontPadding = false
+        gravity = Gravity.CENTER
+        text = "0"
+    }
+
+    var shownLevel: Int = 0
+        private set
+
+    init {
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        setBackgroundResource(R.drawable.bg_item_press)
+        isClickable = true
+        isFocusable = false
+        clipChildren = false
+        clipToPadding = false
+        icon.isClickable = false
+        icon.background = null
+        addView(icon, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        val inset = (iconPx * 0.04f).roundToInt()
+        addView(level, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+            marginEnd = inset + 3
+            bottomMargin = inset + 25
+        })
+    }
+
+    fun setLevel(n: Int) {
+        shownLevel = n
+        val text = n.toString()
+        if (level.text.toString() != text) level.text = text
+        level.setTextColor(DockIconView.fgColor)
+    }
+}
+
+/**
  * Dock 上的数值显示：大号主值 + 可选小号副值 + 可选小号单位。
  *
  * 温度：22 .5 °

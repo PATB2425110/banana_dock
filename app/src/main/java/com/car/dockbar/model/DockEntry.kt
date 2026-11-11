@@ -74,6 +74,8 @@ enum class Builtin(
     MUSIC("music", "音乐信息", 3, true, "封面 + 歌名 + 播放键，宽度自适应 295~500px"),
     // ── [D03] 歌词悬浮窗开关 ──────────────────────
     LYRIC("lyric", "歌词悬浮窗", 1, true, "单击开/关歌词悬浮窗，长按打开歌词设置"),
+    // ── [D26] 音量 ─────────────────────────────
+    VOLUME("volume", "音量", 1, false, "单击打开音量面板：媒体、导航"),
     // ── [D04] 车机设置 ─────────────────────────
     SETTINGS("settings", "车机设置", 1, true, "单击打开车机设置，长按打开 Dock 设置页"),
     // v1.4.20 起「快捷应用」独立成一个按钮，紧挨车机设置（不再和设置挤在一个槽位里）。
@@ -152,12 +154,10 @@ object DockEntries {
     private fun defaults(): List<DockEntry> = listOf(
         DockEntry("b_home", "builtin", Builtin.HOME.action, Builtin.HOME.label, span = 1),
         DockEntry("b_music", "builtin", Builtin.MUSIC.action, Builtin.MUSIC.label, span = 3),
-        DockEntry("b_lyric", "builtin", Builtin.LYRIC.action, Builtin.LYRIC.label),
         DockEntry("b_settings", "builtin", Builtin.SETTINGS.action, Builtin.SETTINGS.label),
         DockEntry("b_app_drawer", "builtin", Builtin.APP_DRAWER.action, Builtin.APP_DRAWER.label),
         DockEntry("b_temp_driver_combo", "builtin", Builtin.TEMP_DRIVER_COMBO.action, Builtin.TEMP_DRIVER_COMBO.label, span = Builtin.TEMP_DRIVER_COMBO.span),
         DockEntry("b_air", "builtin", Builtin.AIR.action, Builtin.AIR.label),
-        DockEntry("b_vent", "builtin", Builtin.VENT.action, Builtin.VENT.label),
         DockEntry("b_fan_combo", "builtin", Builtin.FAN_COMBO.action, Builtin.FAN_COMBO.label, span = Builtin.FAN_COMBO.span),
         DockEntry("b_recirc", "builtin", Builtin.RECIRC.action, Builtin.RECIRC.label),
         DockEntry("b_seat", "builtin", Builtin.SEAT.action, Builtin.SEAT.label),
@@ -175,17 +175,29 @@ object DockEntries {
             for (i in 0 until arr.length()) {
                 arr.optJSONObject(i)?.let { out.add(DockEntry.fromJson(it)) }
             }
-            if (out.isEmpty()) null else out
+            out
         }.getOrNull() ?: return defaultsMutable()
         // v1.4.20 起「快捷应用」从车机设置按钮里独立成一个按钮（紧挨其后）。
         // 老配置里没有这一条，升级时补插到车机设置后面，避免升级后入口消失。
-        if (loaded.none { it.kind == "builtin" && it.action == Builtin.APP_DRAWER.action }) {
+        val migrateMissingEntries = !Prefs.sp(ctx).getBoolean("dock_entries_explicit_layout", false) && loaded.isNotEmpty()
+        if (migrateMissingEntries && loaded.none { it.kind == "builtin" && it.action == Builtin.APP_DRAWER.action }) {
             val entry = DockEntry(
                 "b_app_drawer", "builtin",
                 Builtin.APP_DRAWER.action, Builtin.APP_DRAWER.label
             )
             val at = loaded.indexOfFirst {
                 it.kind == "builtin" && it.action == Builtin.SETTINGS.action
+            }
+            if (at >= 0) loaded.add(at + 1, entry) else loaded.add(entry)
+            save(ctx, loaded)
+        }
+        if (migrateMissingEntries && loaded.none { it.kind == "builtin" && it.action == Builtin.VOLUME.action }) {
+            val entry = DockEntry(
+                "b_volume", "builtin",
+                Builtin.VOLUME.action, Builtin.VOLUME.label
+            )
+            val at = loaded.indexOfFirst {
+                it.kind == "builtin" && it.action == Builtin.LYRIC.action
             }
             if (at >= 0) loaded.add(at + 1, entry) else loaded.add(entry)
             save(ctx, loaded)
@@ -197,6 +209,7 @@ object DockEntries {
         comboChanged = migrateCombo(loaded, Builtin.FAN.action, Builtin.FAN_DOWN.action, Builtin.FAN_UP.action, Builtin.FAN_COMBO) || comboChanged
         comboChanged = migrateCombo(loaded, Builtin.TEMP_PASSENGER.action, Builtin.TEMP_DOWN_PASSENGER.action, Builtin.TEMP_UP_PASSENGER.action, Builtin.TEMP_PASSENGER_COMBO) || comboChanged
         if (comboChanged) save(ctx, loaded)
+        Prefs.sp(ctx).edit().putBoolean("dock_entries_explicit_layout", true).apply()
 
         // v3.13.8：音乐卡宽度已与 span 解耦（弹性 295~500px），
         // 3.13.7 曾把 span 迁到 5，这里无伤害地残留 5 也不影响布局，不再迁移。
@@ -248,6 +261,7 @@ object DockEntries {
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }
         Prefs.setEntriesJson(ctx, arr.toString())
+        Prefs.sp(ctx).edit().putBoolean("dock_entries_explicit_layout", true).apply()
     }
 
     fun reset(ctx: Context) = save(ctx, defaults())

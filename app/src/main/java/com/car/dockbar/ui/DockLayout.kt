@@ -290,20 +290,13 @@ class DockLayout @JvmOverloads constructor(
             }
         }
 
-        // 音乐卡宽度 = 总宽 - 固定项总宽，钳到 [min, max]
-        val avail = (w - fixedTotal).coerceAtLeast(0)
-        val musicW = if (flexIdx >= 0) {
-            avail.coerceIn(flexMin, flexMax)
-        } else avail
-
-        // 剩余/缺口 → 固定项等比分摊（scale=1 = 完全固定不动）
-        val leftover = w - fixedTotal - musicW
-        val scale = if (flexIdx >= 0 && fixedTotal > 0) {
-            (fixedTotal + leftover).toFloat() / fixedTotal
-        } else 1f
+        // 无音乐卡时也按比例分摊整栏宽度；不改变子控件图标、文字尺寸。
+        val plan = DockWidthPlan.create(w, fixedTotal, flexIdx >= 0, flexMin, flexMax)
+        val musicW = plan.flexWidth
+        val scale = plan.fixedScale
 
         // 用浮点累计游标，避免逐项取整造成累计误差（最后一项自动补齐尾差）
-        var cursor = 0f
+        var cursor = plan.startX
         for (i in 0 until childCount) {
             val c = getChildAt(i)
             val lp = c.layoutParams as Lp

@@ -110,7 +110,7 @@ class AppDrawerPopup(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(34)
         ))
 
-        val selected = AppDrawerApps.load(context).take(AppDrawerApps.MAX_APPS)
+        val selected = AppDrawerApps.loadSlots(context)
         for (i in 0 until AppDrawerApps.MAX_APPS) slotApps[i] = selected.getOrNull(i)
 
         gridHost = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -220,7 +220,7 @@ class AppDrawerPopup(
             val b = slotApps[to]
             slotApps[from] = b
             slotApps[to] = a
-            AppDrawerApps.save(context, slotApps.filterNotNull())
+            AppDrawerApps.saveSlots(context, slotApps)
             val whoA = a?.label ?: "空位"
             val whoB = b?.label ?: "空位"
             Logx.d("快捷应用：槽位 $from（$whoA）↔ 槽位 $to（$whoB）互换，已保存")

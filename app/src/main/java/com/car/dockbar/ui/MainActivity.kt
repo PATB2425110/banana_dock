@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.res.ColorStateList
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
@@ -16,10 +17,13 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -56,14 +60,12 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         /**
-         * 设置界面整体缩放倍数：1.2 = 所有尺寸/文字放大 20%（车机上更好点、更好读）。
-         *
-         * 做法：只改 [Configuration.densityDpi]（×1.2）。
-         * dp→px 走 density（= densityDpi/160），sp→px 走 scaledDensity（= density × fontScale），
-         * 二者都随 densityDpi 同比变化，所以 dp 与 sp 会**同步**放大 1.2 倍；
-         * 若再单独改 fontScale 就会叠乘成 1.44 倍，故这里刻意不动 fontScale。
+         * 相对上一版将设置页面整体缩小至 0.9 倍。
+         * 主设置页原密度倍数为 1.2，条目管理页原为 1.0，分别在原值上乘以此系数。
+         * 仅修改 Activity 的 densityDpi，让 dp、sp、弹窗和触摸区域同步重排；
+         * 不修改 fontScale、应用全局密度、Dock 尺寸或底部 128 物理像素避让。
          */
-        private const val UI_SCALE = 1.2f
+        private const val UI_SCALE = 0.9f
 
         /**
          * 子界面模式：只显示某一个分区（由主设置页的入口按钮带 extra 进来）。
@@ -90,11 +92,11 @@ class MainActivity : AppCompatActivity() {
         /** 图标加载专用单线程池（避免为 59 个包名开 59 条线程） */
         private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
-        /** 生成放大后的 Context（仅作用于本 Activity，不影响悬浮窗等其他界面） */
-        fun scaledContext(base: Context): Context {
+        /** 仅缩放设置 Activity 的 Context，不影响悬浮服务。 */
+        fun scaledContext(base: Context, previousScale: Float = 1.2f): Context {
             val res = base.resources
             val config = Configuration(res.configuration)
-            config.densityDpi = (res.displayMetrics.densityDpi * UI_SCALE).toInt()
+            config.densityDpi = (res.displayMetrics.densityDpi * previousScale * UI_SCALE).toInt()
             return base.createConfigurationContext(config)
         }
     }
@@ -117,6 +119,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var llDockApps: LinearLayout
     /** 「打开时隐藏 Dock 的应用」整张卡片（主设置页隐藏，子界面才显示） */
     private var cardDockApps: LinearLayout? = null
+    private var residentAppsPanel: ResidentAppsPanel? = null
+    @Volatile private var residentInstalledApps: List<ResidentAppItem> = emptyList()
+    @Volatile private var residentCatalogLoading = false
     /** 运行日志与日志上传共用的子页面容器 */
     private var cardLogs: LinearLayout? = null
     /** 当前子界面模式（★ v1.5.00 起恒为左栏 6 个入口之一，不再是 null） */
@@ -145,9 +150,11 @@ class MainActivity : AppCompatActivity() {
      * 只在「纯色 / 渐变」形态下显示；透明 / 毛玻璃时隐藏。
      */
     private var bgColorControlRows: List<View> = emptyList()
+    private val backgroundModeTiles = LinkedHashMap<BgMode, BackgroundModeTile>()
     private var blurRadiusRow: View? = null
     private var tvAppDrawerSummary: TextView? = null
     private var btnAppDrawerSelection: Button? = null
+    private var quickAppsGrid: LinearLayout? = null
     /** 歌词悬浮窗配置区控件 */
     private var tvLyricStatus: TextView? = null
     private var btnLyricToggle: Button? = null
@@ -189,14 +196,14 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // ★ 设置页底部让出 Dock 高度：Dock 是 TYPE_APPLICATION_OVERLAY 悬浮窗，
-        //   会盖在页面最后几项上导致点不到。抬高量跟随 Dock 配置
-        //   （dockHeightPx + dockMarginPx，默认 150px）+ 一点余量；
-        //   Dock 在顶部时不影响底部，无需处理。
-        if (Prefs.dockAtBottom(this)) {
-            val root = findViewById<View>(R.id.llRoot)
-            val clear = Prefs.dockHeightPx(this) + Prefs.dockMarginPx(this) + dp(12)
-            root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, root.paddingBottom + clear)
+        // 仅限制左右滚动视口，根背景和中间分割线保持全高。
+        // 使用物理像素 margin，不在内容末尾补空白，也不截断底部背景。
+        listOf(R.id.svNav, R.id.svContent).forEach { id ->
+            val viewport = findViewById<View>(id)
+            (viewport.layoutParams as LinearLayout.LayoutParams).apply {
+                bottomMargin = 128
+                viewport.layoutParams = this
+            }
         }
 
         bindViews()
@@ -205,9 +212,13 @@ class MainActivity : AppCompatActivity() {
         wireActions()
         addDockBehaviorSection()
         addLogUploadSection()
-
-        // ★ v1.5.10：后台预热「系统应用」包名集合，别让第一次点「常驻应用」时去等一次大 Binder
+        styleSettingsCards()
+        SettingsPageLayout(this).rebuild()
+        // Classify installed packages before queueing the resident grid's icon loads.
         prewarmSystemPkgs()
+        residentAppsPanel = ResidentAppsPanel(this, findViewById(R.id.cardDockApps), llDockApps,
+            findViewById(R.id.btnAddApp), findViewById(R.id.btnGrantAccessibility))
+        renderDockAppList()
 
         // ★ v1.5.00：左栏入口 + 右栏内容。先建左栏，再按 extra 选中对应页
         buildNav()
@@ -265,6 +276,10 @@ class MainActivity : AppCompatActivity() {
         notifWasOk = notifOk
         updateStatus()
         updateLyricStatus()
+        if (currentPage == SECTION_APPS) prewarmSystemPkgs(force = true)
+        refreshAppDrawerSelectionLabel()
+        findViewById<TextView>(R.id.settingsEntryCount)?.text =
+            "已添加 ${com.car.dockbar.model.DockEntries.load(this).size} 项"
         // 系统深浅色可能已切换 → 渐变预览要跟着换成另一套色标
         refreshGradientPreview()
         main.postDelayed({ updateStatus(); ensureServiceStarted() }, 1500)
@@ -372,11 +387,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshAppearanceLabels() {
-        tvCorner.text = "圆角半径：${findViewById<SeekBar>(R.id.sbCorner).progress} px"
+        tvCorner.text = "${findViewById<SeekBar>(R.id.sbCorner).progress} px"
         val isc = 0.5f + findViewById<SeekBar>(R.id.sbIconScale).progress / 100f
-        tvIconScale.text = "图标缩放：${"%.2f".format(isc)}×"
+        tvIconScale.text = "${"%.2f".format(isc)}×"
         val tsc = 0.5f + findViewById<SeekBar>(R.id.sbTextScale).progress / 100f
-        tvTextScale.text = "文字缩放：${"%.2f".format(tsc)}×"
+        tvTextScale.text = "${"%.2f".format(tsc)}×"
     }
 
     private fun wireActions() {
@@ -396,7 +411,7 @@ class MainActivity : AppCompatActivity() {
             main.postDelayed({ updateStatus() }, 800)
         }
 
-        findViewById<Button>(R.id.btnApplyAppearance).setOnClickListener {
+        findViewById<SwitchCompat>(R.id.swSeparators).setOnCheckedChangeListener { _, _ ->
             saveAppearance()
             reloadService()
         }
@@ -448,6 +463,7 @@ class MainActivity : AppCompatActivity() {
             logBuffer = StringBuilder()
             logLineCount = 0
             tvLog.text = ""
+            (svLog as? LogTailScrollView)?.resumeFollowing()
         }
     }
 
@@ -473,6 +489,7 @@ class MainActivity : AppCompatActivity() {
         val pageRoot = findViewById<LinearLayout>(R.id.llRoot)
         val appearance = findViewById<LinearLayout>(R.id.cardAppearance)
         val root = LinearLayout(this).apply {
+            id = R.id.settingsDockEntriesPage
             orientation = LinearLayout.VERTICAL
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_card)
             setPadding(dp(14), dp(14), dp(14), dp(14))
@@ -488,9 +505,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(Button(this).apply {
+            id = R.id.settingsManageDockEntries
             text = "管理 Dock 图标（增删 / 排序）"
             textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_on_accent))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
             setOnClickListener {
                 startActivity(Intent(this@MainActivity, DockEntriesActivity::class.java))
@@ -500,36 +518,59 @@ class MainActivity : AppCompatActivity() {
         ).apply { topMargin = dp(8) })
 
         tvAppDrawerSummary = TextView(this).apply {
+            id = R.id.settingsQuickAppsSummary
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
             textSize = 12f
             setPadding(0, dp(10), 0, 0)
         }
         root.addView(tvAppDrawerSummary)
         btnAppDrawerSelection = Button(this).apply {
+            id = R.id.settingsManageQuickApps
             textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_on_accent))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
             setOnClickListener { chooseAppDrawerApps() }
         }
         root.addView(btnAppDrawerSelection, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(4) })
+        quickAppsGrid = LinearLayout(this).apply {
+            id = R.id.settingsQuickAppsGrid
+            orientation = LinearLayout.VERTICAL
+        }
+        root.addView(quickAppsGrid)
         refreshAppDrawerSelectionLabel()
 
         // --- 空调状态弹窗（自动消失） ---
         // ── [S00] 空调状态弹窗（调空调时显示） ───────────────
+        var popupDurationView: LinearLayout? = null
+        fun updatePopupDurationEnabled(enabled: Boolean) {
+            popupDurationView?.apply {
+                alpha = if (enabled) 1f else .4f
+                for (i in 0 until childCount) {
+                    (getChildAt(i) as? SeekBar)?.isEnabled = enabled
+                }
+            }
+        }
         addSwitchRow(
-            root, "空调状态弹窗（调空调时显示）",
+            root, "空调状态弹窗",
             Prefs.popupEnabled(this)
-        ) { Prefs.setPopupEnabled(this, it) }
+        ) {
+            Prefs.setPopupEnabled(this, it)
+            updatePopupDurationEnabled(it)
+        }
+        root.getChildAt(root.childCount - 1).id = R.id.settingsPopupSwitchRow
         // ★ 用户要求：精确到秒（1 秒步进，不再 0.1 秒）
         // ── [S01] 弹窗自动消失 ───────────────────────
-        addSeekRow(
-            root, "弹窗自动消失",
+        popupDurationView = addSeekRow(
+            root, "弹窗显示时长",
             (Prefs.popupAutoDismissMs(this) / 1000L).toInt(), 20,
             { "${it} 秒" },
-            onChange = { Prefs.setPopupAutoDismissMs(this, it * 1000L) }
+            onChange = { Prefs.setPopupAutoDismissMs(this, it * 1000L) },
+            separateValue = true
         )
+        popupDurationView?.id = R.id.settingsPopupDurationRow
+        updatePopupDurationEnabled(Prefs.popupEnabled(this))
 
         // --- 淡入淡出（时长滑块用于调节显示/隐藏动画快慢）---
         // 0.1 秒粒度（10ms 步进太细不好调）
@@ -538,8 +579,10 @@ class MainActivity : AppCompatActivity() {
             root, "淡入淡出时长",
             (Prefs.fadeDurationMs(this) / 100L).toInt(), 10,
             { "%.1f 秒".format(it / 10f) },
-            onChange = { Prefs.setFadeDurationMs(this, it * 100L) }
+            onChange = { Prefs.setFadeDurationMs(this, it * 100L) },
+            separateValue = true
         )
+        root.getChildAt(root.childCount - 1).id = R.id.settingsFadeDurationRow
 
         val overlaySide = findViewById<LinearLayout>(R.id.colOverlaySide)
         addSwitchRow(
@@ -556,14 +599,16 @@ class MainActivity : AppCompatActivity() {
         // --- ★ v1.4.82：AUTO 风道档位（这台车有 5 档 AUTO 风道） ---
         // ── [S05] AUTO 风道档位 ────────────────────
         addSeekRow(
-            root, "AUTO 风道档位",
+            root, "当前档位",
             Prefs.fanAutoLevel(this), 5,
             { "%d 档".format(it) },
             onChange = {
                 // ★ v1.4.84：滑条必须**直接写车机**（之前只存本地 Pref → 车机没反应）
                 com.car.dockbar.vehicle.VehicleController.setFanAutoLevel(this, it)
-            }
+            },
+            separateValue = true
         )
+        root.getChildAt(root.childCount - 1).id = R.id.settingsAutoFanRow
 
         // --- 日夜模式背景（与外观/渐变设置放在一起） ---
         // ── [S06] 底色跟随系统日夜模式 ───────────────────
@@ -571,6 +616,7 @@ class MainActivity : AppCompatActivity() {
             appearance, "底色跟随系统日夜模式",
             Prefs.bgFollowNight(this)
         ) { Prefs.setBgFollowNight(this, it) }
+        appearance.getChildAt(appearance.childCount - 1).id = R.id.settingsFollowNightRow
 
         // （「空调温度」分区已按用户要求从设置页移除：
         //   双温联动改由长按副驾温度切换、HI/LO 阈值用车机默认 15.5~28.5℃）
@@ -586,23 +632,39 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
-        // ── ★ v3.13.16：背景形态（四选一互斥）────────────────
-        //   纯色 / 透明 / 渐变 / 毛玻璃
-        //   ★ 毛玻璃是实验特性（PixelCopy 抓屏）：失败或崩溃会自动退回「渐变」。
-        //   ★ 两个「底色透明度」滑杆**只属于纯色 / 渐变**，
-        //     切到透明或毛玻璃时自动隐藏（毛玻璃的色调是固定的淡色）。
+        // 背景形态四选一；旧「模糊」入口用于透明灰色叠层试验，不采样屏幕。
         addBgModeRow(appearance)
-        blurRadiusRow = addSeekRow(
-            appearance, "模糊度",
-            Prefs.blurRadius(this), 24,
-            { if (it == 0) "无" else "$it" },
-            onChange = { Prefs.setBlurRadius(this, it) }
+        val overlayControls = LinearLayout(this).apply {
+            id = R.id.settingsOverlayControls
+            orientation = LinearLayout.VERTICAL
+        }
+        appearance.addView(overlayControls, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        blurRadiusRow = overlayControls
+        addSeekRow(
+            overlayControls, "第二层 · 灰色深浅",
+            Prefs.overlayGrayLevel(this), 100,
+            { when (it) { 0 -> "黑色"; 100 -> "白色"; else -> "$it%（越大越浅）" } },
+            onChange = { Prefs.setOverlayGrayLevel(this, it) }
         )
+        addSeekRow(
+            overlayControls, "第三层 · 透明度",
+            Prefs.overlayTransparency(this), 100,
+            { when (it) { 0 -> "不透明"; 100 -> "完全透明"; else -> "$it%" } },
+            onChange = { Prefs.setOverlayTransparency(this, it) }
+        )
+        overlayControls.addView(TextView(this).apply {
+            text = "第一层始终纯透明。灰色深浅与合成透明度分别调节，不影响图标和文字；此效果不是真正的背景模糊。"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
+            setPadding(0, dp(8), 0, 0)
+        })
         blurRadiusRow?.visibility =
             if (Prefs.bgMode(this) == BgMode.BLUR) View.VISIBLE else View.GONE
 
         // 实时预览条：按当前配置（含系统深浅色）画一条一模一样的渐变
         val preview = GradientPreviewView(this).apply {
+            id = R.id.settingsGradientPreview
             setPadding(0, dp(4), 0, 0)
         }
         gradientPreview = preview
@@ -616,18 +678,23 @@ class MainActivity : AppCompatActivity() {
             Prefs.dayBgTransparency(this), 100,
             format = { "$it%" },
             onChange = { Prefs.setDayBgTransparency(this, it) },
-            onProgress = { p -> Prefs.setDayBgTransparency(this, p); refreshGradientPreview() }
+            onProgress = { p -> Prefs.setDayBgTransparency(this, p); refreshGradientPreview() },
+            separateValue = true
         )
+        dayTransparencyRow.id = R.id.settingsDayTransparencyRow
         // ── 夜间底色透明度 ───────────────────────
         val nightTransparencyRow = addSeekRow(
             appearance, "夜间底色透明度",
             Prefs.nightBgTransparency(this), 100,
             format = { "$it%" },
             onChange = { Prefs.setNightBgTransparency(this, it) },
-            onProgress = { p -> Prefs.setNightBgTransparency(this, p); refreshGradientPreview() }
+            onProgress = { p -> Prefs.setNightBgTransparency(this, p); refreshGradientPreview() },
+            separateValue = true
         )
+        nightTransparencyRow.id = R.id.settingsNightTransparencyRow
         // ★ v3.13.16：按当前形态显隐相关控件（滑杆/预览条只属于纯色与渐变）
         bgColorControlRows = listOf(dayTransparencyRow, nightTransparencyRow)
+        refreshBgModeButtons(backgroundModeTiles, Prefs.bgMode(this))
 
         refreshGradientPreview()
 
@@ -641,11 +708,161 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAppDrawerSelectionLabel() {
         val count = AppDrawerApps.load(this).size
-        tvAppDrawerSummary?.text = "从系统应用和个人应用中选择，最多 ${AppDrawerApps.MAX_APPS} 个；当前已选 $count 个。"
-        btnAppDrawerSelection?.text = "选择快捷应用（$count/${AppDrawerApps.MAX_APPS}）"
+        tvAppDrawerSummary?.text = "已选择 $count / ${AppDrawerApps.MAX_APPS}"
+        btnAppDrawerSelection?.text = "管理应用"
+        renderQuickAppsGrid()
     }
 
-    private fun chooseAppDrawerApps() {
+    private fun renderQuickAppsGrid() {
+        val grid = quickAppsGrid ?: return
+        grid.removeAllViews()
+        val apps = AppDrawerApps.loadSlots(this)
+        val slotViews = mutableListOf<View>()
+        var dragFrom = -1
+        var dragTo = -1
+        fun highlightDrag() {
+            slotViews.forEachIndexed { index, view ->
+                view.alpha = when {
+                    dragFrom < 0 -> 1f
+                    index == dragFrom -> .9f
+                    index == dragTo -> 1f
+                    else -> .5f
+                }
+                view.elevation = if (index == dragFrom) dp(8).toFloat() else 0f
+            }
+        }
+        fun finishDrag(commit: Boolean) {
+            val from = dragFrom
+            val to = dragTo
+            dragFrom = -1
+            dragTo = -1
+            grid.parent?.requestDisallowInterceptTouchEvent(false)
+            if (commit && from in 0 until AppDrawerApps.MAX_APPS &&
+                to in 0 until AppDrawerApps.MAX_APPS && from != to) {
+                // Swap only two fixed slots, including empty slots.
+                val slots = MutableList<AppDrawerApp?>(AppDrawerApps.MAX_APPS) { apps.getOrNull(it) }
+                val old = slots[from]
+                slots[from] = slots[to]
+                slots[to] = old
+                AppDrawerApps.saveSlots(this, slots)
+                Logx.d("设置页快捷应用：槽位 $from ↔ $to，已保存")
+                refreshAppDrawerSelectionLabel()
+            } else highlightDrag()
+        }
+        repeat(2) { rowIndex ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            grid.addView(row, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { if (rowIndex > 0) topMargin = dp(14) })
+            repeat(3) { colIndex ->
+                val slot = rowIndex * 3 + colIndex
+                val app = apps.getOrNull(slot)
+                val tile = FrameLayout(this).apply {
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_field)
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = if (app == null) "管理快捷应用 ${slot + 1}" else "替换快捷应用 ${app.label}"
+                    setOnClickListener {
+                        if (app == null) chooseAppDrawerApps() else chooseAppDrawerApps(slot)
+                    }
+                    if (app != null) setOnLongClickListener {
+                        if (dragFrom >= 0) return@setOnLongClickListener true
+                        dragFrom = slot
+                        dragTo = slot
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        highlightDrag()
+                        true
+                    }
+                    setOnTouchListener { _, event ->
+                        if (dragFrom != slot) return@setOnTouchListener false
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_MOVE -> {
+                                val location = IntArray(2)
+                                val target = slotViews.indexOfFirst { view ->
+                                    view.getLocationOnScreen(location)
+                                    event.rawX >= location[0] && event.rawX <= location[0] + view.width &&
+                                        event.rawY >= location[1] && event.rawY <= location[1] + view.height
+                                }
+                                if (target >= 0 && target != dragTo) {
+                                    dragTo = target
+                                    highlightDrag()
+                                }
+                                true
+                            }
+                            MotionEvent.ACTION_UP -> { finishDrag(true); true }
+                            MotionEvent.ACTION_CANCEL -> { finishDrag(false); true }
+                            else -> false
+                        }
+                    }
+                }
+                slotViews.add(tile)
+                val body = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(10), dp(12), dp(10), dp(12))
+                }
+                tile.addView(body, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                val icon = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    if (app != null) {
+                        setImageResource(R.drawable.ic_car)
+                        loadAppIconAsync(app.packageName, this)
+                    } else {
+                        setImageDrawable(GradientDrawable().apply { setColor(Color.TRANSPARENT) })
+                    }
+                }
+                if (app != null) body.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
+                else body.addView(TextView(this).apply {
+                    text = "+"
+                    textSize = 32f
+                    gravity = Gravity.CENTER
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
+                }, LinearLayout.LayoutParams(dp(42), dp(42)))
+                body.addView(TextView(this).apply {
+                    text = app?.label ?: "管理应用"
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTextColor(ContextCompat.getColor(this@MainActivity,
+                        if (app == null) R.color.settings_secondary else R.color.settings_text))
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(7) })
+                if (app != null) tile.addView(TextView(this).apply {
+                    text = "×"
+                    textSize = 35f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    includeFontPadding = false
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(0xFFE5484D.toInt())
+                    }
+                    contentDescription = "清除快捷应用 ${app.label}"
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        val current = AppDrawerApps.loadSlots(this@MainActivity).toMutableList()
+                        if (current[slot]?.packageName == app.packageName) {
+                            current[slot] = null
+                            AppDrawerApps.saveSlots(this@MainActivity, current)
+                        }
+                        refreshAppDrawerSelectionLabel()
+                    }
+                }, FrameLayout.LayoutParams(dp(45), dp(45), Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(4)
+                    marginEnd = dp(4)
+                })
+                row.addView(tile, LinearLayout.LayoutParams(0, dp(98), 1f).apply {
+                    if (colIndex > 0) marginStart = dp(14)
+                })
+            }
+        }
+    }
+
+    private fun chooseAppDrawerApps(slot: Int? = null) {
         val loading = AlertDialog.Builder(this)
             .setTitle("正在读取可启动应用…")
             .setCancelable(true)
@@ -676,7 +893,7 @@ class MainActivity : AppCompatActivity() {
             }.getOrDefault(emptyList())
             main.post {
                 runCatching { loading.dismiss() }
-                showAppDrawerPicker(items)
+                if (slot == null) showAppDrawerPicker(items) else showAppDrawerSlotPicker(items, slot)
             }
         }.start()
     }
@@ -832,7 +1049,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(Button(this).apply {
             text = if (Prefs.lyricEnabled(this@MainActivity)) "关闭歌词悬浮窗" else "启动歌词悬浮窗"
             textSize = 13f
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_on_accent))
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
             setOnClickListener {
                 if (Prefs.lyricEnabled(this@MainActivity)) {
@@ -989,7 +1206,8 @@ class MainActivity : AppCompatActivity() {
                 this,
                 if (selected) R.drawable.bg_button_primary else R.drawable.bg_field
             )
-            btn.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF9AA1AE.toInt())
+            btn.setTextColor(ContextCompat.getColor(this,
+                if (selected) R.color.settings_on_accent else R.color.settings_secondary))
         }
     }
 
@@ -1001,7 +1219,8 @@ class MainActivity : AppCompatActivity() {
                 this,
                 if (selected) R.drawable.bg_button_primary else R.drawable.bg_field
             )
-            btn.setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFF9AA1AE.toInt())
+            btn.setTextColor(ContextCompat.getColor(this,
+                if (selected) R.color.settings_on_accent else R.color.settings_secondary))
         }
     }
 
@@ -1031,7 +1250,8 @@ class MainActivity : AppCompatActivity() {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = dp(6).toFloat()
                     setColor(c)
-                    setStroke(dp(2), if (c == current) 0xFF3D8BFF.toInt() else 0x33FFFFFF)
+                    setStroke(dp(2), if (c == current)
+                        ContextCompat.getColor(this@MainActivity, R.color.settings_accent) else 0x33FFFFFF)
                 }
                 setOnClickListener {
                     onPick(c)
@@ -1144,7 +1364,7 @@ class MainActivity : AppCompatActivity() {
         val tvState = TextView(this).apply {
             setTextColor(0xFF9AA1AE.toInt())
             textSize = 11f
-            setPadding(0, dp(6), 0, 0)
+            setPadding(0, dp(12), 0, dp(12))
         }
         tvStateRef = tvState
         root.addView(tvState)
@@ -1583,12 +1803,12 @@ class MainActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(6), 0, 0)
+            setPadding(0, dp(12), 0, dp(12))
         }
         row.addView(TextView(this).apply {
             text = label
             setTextColor(0xFFEDEFF3.toInt())
-            textSize = 12f
+            textSize = 16f
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val sw = SwitchCompat(this).apply { isChecked = checked }
         sw.setOnCheckedChangeListener { _, v ->
@@ -1609,26 +1829,44 @@ class MainActivity : AppCompatActivity() {
         format: (Int) -> String,
         reloadDock: Boolean = true,
         onChange: (Int) -> Unit,
-        onProgress: ((Int) -> Unit)? = null
+        onProgress: ((Int) -> Unit)? = null,
+        separateValue: Boolean = false
     ): LinearLayout {
         // ★ v3.13.16：把「标签 + 滑杆」包进一个容器并返回 —— 便于按背景形态整体显隐
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
         val tv = TextView(this).apply {
-            text = "$label：${format(progress)}"
+            text = if (separateValue) format(progress) else "$label：${format(progress)}"
             setTextColor(0xFF9AA1AE.toInt())
-            textSize = 11f
+            textSize = 15f
             setPadding(0, dp(6), 0, 0)
         }
-        box.addView(tv, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        if (separateValue) {
+            box.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = label
+                    textSize = 16f
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_text))
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                tv.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_accent))
+                addView(tv)
+            })
+        } else {
+            box.addView(tv, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
         val sb = SeekBar(this).apply {
             this.max = max
             this.progress = progress
+            minimumHeight = dp(44)
         }
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                tv.text = "$label：${format(p)}"
+                tv.text = if (separateValue) format(p) else "$label：${format(p)}"
                 onProgress?.invoke(p)
             }
             override fun onStartTrackingTouch(s: SeekBar?) {}
@@ -1673,19 +1911,25 @@ class MainActivity : AppCompatActivity() {
      * 现在：`onCreate` 就扔到后台单线程池（复用图标加载那条线程），取回来写缓存；
      * 如果用户此刻已经停在「常驻应用」页，顺手重排一次列表。
      */
-    private fun prewarmSystemPkgs() {
-        if (systemPkgCache != null) return
-        iconExecutor.execute {
-            val set = runCatching {
-                packageManager.getInstalledApplications(0)
-                    .asSequence()
-                    .filter { (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 }
-                    .map { it.packageName }
-                    .toSet()
-            }.getOrDefault(emptySet())
-            systemPkgCache = set
-            main.post { if (currentPage == SECTION_APPS) renderDockAppList() }
-        }
+    private fun prewarmSystemPkgs(force: Boolean = false) {
+        if (residentCatalogLoading || (!force && systemPkgCache != null)) return
+        residentCatalogLoading = true
+        Thread {
+            val installed = runCatching { packageManager.getInstalledApplications(0) }.getOrDefault(emptyList())
+            val nameOrder = AppDisplayNameOrder.comparator()
+            residentInstalledApps = installed.distinctBy { it.packageName }.map { info ->
+                ResidentAppItem(info.packageName,
+                    runCatching { packageManager.getApplicationLabel(info).toString() }.getOrDefault(info.packageName),
+                    (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0)
+            }.sortedWith(Comparator { left, right ->
+                val label = nameOrder.compare(left.label, right.label)
+                if (label != 0) label else left.pkg.compareTo(right.pkg)
+            })
+            systemPkgCache = installed.filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 }
+                .mapTo(HashSet()) { it.packageName }
+            residentCatalogLoading = false
+            main.post { if (!isDestroyed && currentPage == SECTION_APPS) renderDockAppList() }
+        }.apply { isDaemon = true; name = "resident-app-catalog" }.start()
     }
 
     /**
@@ -1745,94 +1989,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 渲染名单：系统默认全屏应用全部列出（默认关 = 隐藏 Dock），
-     * 用户自己添加的应用也列在后面。
-     *
-     * ★ v1.4.97 #7：开关语义回到「常驻显示」——
-     *   **打开** = 这个应用在前台时 Dock 保持显示；**关闭** = Dock 隐藏。
-     * ★ v1.4.97 #8：行高 / 字号放大，与外层设置页一致。
-     * ★ v1.4.98：**左右两栏** —— 左=系统应用，右=个人应用；
-     *   系统 Dock 白名单（Prefs.DEFAULT_DOCK_SHOW）里的默认开关是「开」。
+     * 系统 / 个人应用五列图标网格。绿勾沿用原来的常驻显示语义，
+     * 不改默认名单、用户名单或前台检测逻辑；取消勾选时该应用前台隐藏 Dock。
      */
     private fun renderDockAppList() {
-        llDockApps.removeAllViews()
+        val panel = residentAppsPanel ?: return
         val always = Prefs.dockAlwaysShowApps(this)
         val customHide = Prefs.dockCustomHideApps(this)
-        val defaults = Prefs.DEFAULT_DOCK_HIDE.map { it.first }
-        val custom = (always + customHide).filter { p -> defaults.none { it == p } }.distinct()
-        val sysPkgs = systemPkgs()
-
-        val twoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        val (colSys, bodySys) = appListColumn("系统应用")
-        val (colUser, bodyUser) = appListColumn("个人应用")
-        twoCol.addView(colSys)
-        twoCol.addView(colUser)
-        llDockApps.addView(twoCol)
-
-        for (pkg in (defaults + custom).distinct()) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_field)
-                setPadding(dpInt(10), dpInt(8), dpInt(8), dpInt(8))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dpInt(4) }
+        val defaults = Prefs.DEFAULT_DOCK_HIDE.mapTo(HashSet()) { it.first }
+        // Show only real installed packages, including apps without a launcher entry.
+        val apps = residentInstalledApps
+        val packages = apps.map { it.pkg }
+        val selected = ResidentAppRules.selected(packages, always, defaults, customHide)
+        panel.render(apps, selected, ::loadAppIconAsync) { pkg, on ->
+            val a = Prefs.dockAlwaysShowApps(this).toMutableSet()
+            val h = Prefs.dockCustomHideApps(this).toMutableSet()
+            if (on) { a.add(pkg); h.remove(pkg) }
+            else {
+                a.remove(pkg)
+                if (pkg !in defaults) h.add(pkg) else h.remove(pkg)
             }
-            row.addView(ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dpInt(34), dpInt(34))
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                // ★ v1.5.5：先放兜底图标，真正的图标走异步加载（见 loadAppIconAsync）
-                setImageResource(R.drawable.ic_car)
-            }.also { loadAppIconAsync(pkg, it) })
-            val tv = TextView(this).apply {
-                text = "${Prefs.dockHideLabel(pkg)}\n$pkg"
-                setTextColor(0xFFEDEFF3.toInt())
-                textSize = 15f
-                setPadding(dpInt(6), 0, dpInt(6), 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-                )
-            }
-            val sw = SwitchCompat(this).apply {
-                isChecked = always.contains(pkg)
-                setOnCheckedChangeListener { _, on ->
-                    val a = Prefs.dockAlwaysShowApps(this@MainActivity).toMutableSet()
-                    val h = Prefs.dockCustomHideApps(this@MainActivity).toMutableSet()
-                    if (on) {
-                        a.add(pkg); h.remove(pkg)
-                    } else {
-                        a.remove(pkg)
-                        // 系统默认全屏应用本来就会隐藏，不必再记一份；自定义应用要记下来
-                        if (pkg !in defaults) h.add(pkg) else h.remove(pkg)
-                    }
-                    Prefs.setDockAlwaysShowApps(this@MainActivity, a)
-                    Prefs.setDockCustomHideApps(this@MainActivity, h)
-                    notifyAppsChanged()
-                    Logx.d("名单：$pkg → ${if (on) "常驻显示" else "隐藏"}")
-                }
-            }
-            row.addView(tv)
-            row.addView(sw)
-            if (pkg in sysPkgs) bodySys.addView(row) else bodyUser.addView(row)
-        }
-        // 某一栏为空时给个占位，避免看起来像没加载出来
-        listOf(bodySys to "（无系统应用）", bodyUser to "（无个人应用）").forEach { (body, tip) ->
-            if (body.childCount == 0) {
-                body.addView(TextView(this@MainActivity).apply {
-                    text = tip
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-                    textSize = 13f
-                    setPadding(dpInt(6), dpInt(6), 0, dpInt(6))
-                })
-            }
+            Prefs.setDockAlwaysShowApps(this, a)
+            Prefs.setDockCustomHideApps(this, h)
+            notifyAppsChanged()
+            panel.setSelection(ResidentAppRules.selected(packages, a, defaults, h))
+            Logx.d("名单：$pkg → ${if (on) "常驻显示" else "隐藏"}")
         }
         refreshAccStatus()
     }
@@ -1997,6 +2178,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAccStatus() {
         AccessibilityKeep.restore(this)
         val on = isAccessibilityEnabled()
+        residentAppsPanel?.setDetection(on)
         val cur = ForegroundTracker.currentPackage
         val state = if (on) "已开启" else "未开启"
         val tail = if (on) {
@@ -2006,6 +2188,8 @@ class MainActivity : AppCompatActivity() {
         }
         tvAccPerm.text = if (on) "已授权" else "未授权"
         tvAccPerm.setTextColor(permColor(on))
+        // 已授权也保留系统设置跳转，便于查看或修改授权。
+        findViewById<View>(R.id.btnGrantAccessibilityDock).visibility = View.VISIBLE
         tvAccHint.visibility = if (on) View.GONE else View.VISIBLE
         tvAccStatus.text = android.text.SpannableStringBuilder().apply {
             append("前台应用检测：")
@@ -2035,11 +2219,11 @@ class MainActivity : AppCompatActivity() {
     /** 左栏入口。右侧仍是原来的页面，只改左侧样子。 */
     private val NAV_ITEMS = listOf(
         NavSpec(SECTION_OVERLAY, "悬浮 Dock 栏", R.drawable.ic_nav_dock),
-        NavSpec(SECTION_APPEARANCE, "外观", R.drawable.ic_nav_home),
-        NavSpec(SECTION_ICONS, "Dock条目", R.drawable.ic_nav_grid),
-        NavSpec(SECTION_LYRIC, "歌词", R.drawable.ic_nav_doc),
-        NavSpec(SECTION_APPS, "常驻应用", R.drawable.ic_nav_list),
-        NavSpec(SECTION_LOGS, "诊断", R.drawable.ic_nav_pulse)
+        NavSpec(SECTION_APPEARANCE, "外观与风格", R.drawable.ic_nav_home),
+        NavSpec(SECTION_ICONS, "Dock 图标管理", R.drawable.ic_nav_grid),
+        NavSpec(SECTION_LYRIC, "歌词悬浮窗", R.drawable.ic_nav_doc),
+        NavSpec(SECTION_APPS, "常驻应用设置", R.drawable.ic_nav_list),
+        NavSpec(SECTION_LOGS, "诊断与日志", R.drawable.ic_nav_pulse)
     )
 
     /** 生成左栏：标题 + 图标文字行。当前项左侧青色竖条。 */
@@ -2047,14 +2231,41 @@ class MainActivity : AppCompatActivity() {
         val nav = findViewById<LinearLayout>(R.id.llNav)
         nav.removeAllViews()
         navButtons.clear()
+        nav.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(28), dp(10), dp(12), dp(36))
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.mipmap.ic_launcher)
+                imageTintList = null
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setPadding(0, 0, 0, 0)
+            }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            addView(TextView(this@MainActivity).apply {
+                text = "Banana_Dock"
+                textSize = 20f
+                setTextColor(0xFFF2F4F8.toInt())
+                typeface = AppFont.bold(this@MainActivity)
+                maxLines = 1
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(12)
+            })
+        })
         nav.addView(TextView(this).apply {
-            text = "设置"
-            textSize = 22f
-            setTextColor(0xFFF2F4F8.toInt())
-            typeface = AppFont.bold(this@MainActivity)
-            setPadding(dp(20), dp(8), dp(12), dp(18))
+            text = "个性化设置"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
+            setPadding(dp(28), 0, dp(12), dp(18))
         })
         for (item in NAV_ITEMS) {
+            if (item.page == SECTION_LOGS) {
+                nav.addView(View(this).apply {
+                    setBackgroundColor(0xFF3B414D.toInt())
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                    setMargins(dp(28), dp(4), dp(28), dp(16))
+                })
+            }
             val bar = View(this).apply {
                 setBackgroundColor(0x00000000)
                 layoutParams = LinearLayout.LayoutParams(dp(3), dp(28)).apply {
@@ -2071,7 +2282,7 @@ class MainActivity : AppCompatActivity() {
             }
             val label = TextView(this).apply {
                 text = item.label
-                textSize = 16f
+                textSize = 18f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 includeFontPadding = false
@@ -2088,25 +2299,46 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, 0, dp(12), 0)
-                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_item_press)
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_settings_nav_idle)
                 isClickable = true
                 isFocusable = true
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(56)
-                )
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(60)
+                ).apply {
+                    marginStart = dp(16)
+                    marginEnd = dp(16)
+                    bottomMargin = dp(12)
+                }
                 setOnClickListener { showPage(item.page) }
                 addView(bar)
                 addView(icon)
                 addView(label)
             }
             nav.addView(row)
-            navButtons[item.page] = NavRow(bar, icon, label)
+            navButtons[item.page] = NavRow(row, bar, icon, label)
         }
-        nav.addView(TextView(this).apply {
-            text = "v${Prefs.appVersion(this@MainActivity)}"
-            textSize = 11f
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
-            setPadding(dp(20), dp(16), dp(12), 0)
+        nav.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_card)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            addView(TextView(this@MainActivity).apply {
+                id = R.id.settingsNavStatus
+                text = "●  Dock 未运行"
+                textSize = 14f
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.warn))
+            })
+            addView(TextView(this@MainActivity).apply {
+                id = R.id.settingsNavVersion
+                text = "v${Prefs.appVersion(this@MainActivity)}"
+                textSize = 24f
+                gravity = Gravity.END or Gravity.BOTTOM
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_secondary))
+                setPadding(0, dp(12), 0, 0)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT))
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(24), dp(28), dp(24), dp(16))
         })
     }
 
@@ -2135,11 +2367,13 @@ class MainActivity : AppCompatActivity() {
 
     /** 左栏当前页：青色竖条、青色图标和文字 */
     private fun updateNavSelection() {
-        val accent = ContextCompat.getColor(this, R.color.nav_accent)
-        val idle = ContextCompat.getColor(this, R.color.nav_idle)
+        val accent = ContextCompat.getColor(this, R.color.settings_accent)
+        val idle = ContextCompat.getColor(this, R.color.settings_secondary)
         for ((page, row) in navButtons) {
             val on = page == currentPage
             val color = if (on) accent else idle
+            row.container.background = ContextCompat.getDrawable(this,
+                if (on) R.drawable.bg_settings_nav_selected else R.drawable.bg_settings_nav_idle)
             row.bar.setBackgroundColor(if (on) accent else 0x00000000)
             row.icon.imageTintList = ColorStateList.valueOf(color)
             row.label.setTextColor(color)
@@ -2152,7 +2386,43 @@ class MainActivity : AppCompatActivity() {
 
     private data class NavSpec(val page: String, val label: String, val icon: Int)
 
-    private class NavRow(val bar: View, val icon: ImageView, val label: TextView)
+    private class NavRow(val container: View, val bar: View, val icon: ImageView, val label: TextView)
+
+    /** 只统一设置卡片的外观，不改变各分区的控件顺序或滚动结构。 */
+    private fun styleSettingsCards() {
+        val root = findViewById<LinearLayout>(R.id.llRoot)
+        for (i in 0 until root.childCount) {
+            val card = root.getChildAt(i) as? LinearLayout ?: continue
+            if (card.background == null) continue
+            card.setPadding(dp(24), dp(24), dp(24), dp(24))
+            val heading = card.getChildAt(0) as? TextView ?: continue
+            if (heading is Button) continue
+            heading.textSize = 21f
+            heading.typeface = AppFont.bold(this)
+        }
+    }
+
+    private fun showAppDrawerSlotPicker(items: List<AppDrawerCandidate>, slot: Int) {
+        if (items.isEmpty()) {
+            toastOnce("没有读到可启动的应用")
+            return
+        }
+        val labels = items.map { "${it.app.label}\n${it.app.packageName}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(if (AppDrawerApps.loadSlots(this).getOrNull(slot) != null) "替换快捷应用" else "添加快捷应用")
+            .setItems(labels) { _, index ->
+                val chosen = items[index].app
+                val apps = AppDrawerApps.loadSlots(this).toMutableList()
+                val existing = apps.indexOfFirst { it?.packageName == chosen.packageName }
+                if (existing >= 0 && existing != slot) apps[existing] = apps[slot]
+                apps[slot] = chosen
+                AppDrawerApps.saveSlots(this, apps)
+                refreshAppDrawerSelectionLabel()
+                Logx.d("快捷应用已更新：${apps.count { it != null }} 个应用")
+            }
+            .setNegativeButton("取消", null)
+            .showDockSafe()
+    }
 
     /** 兼容老入口（「更多设置」那 3 个按钮 / 外部带 extra 进来） */
     private fun enterSection(name: String) = showPage(name)
@@ -2179,6 +2449,7 @@ class MainActivity : AppCompatActivity() {
         hideAllSections()
         lyricSectionStart = root.childCount
         addLyricSection()
+        SettingsPageLayout(this).rebuildLyrics(root, lyricSectionStart)
     }
 
     private fun dpInt(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -2258,6 +2529,18 @@ class MainActivity : AppCompatActivity() {
         val st = VehicleController.state
         val running = DockOverlayService.alive
         val mounted = DockOverlayService.attached
+        findViewById<TextView>(R.id.settingsRuntimeBadge)?.apply {
+            text = if (running) "●  Dock 正在运行" else "●  Dock 未运行"
+            setTextColor(ContextCompat.getColor(this@MainActivity,
+                if (running) R.color.settings_service_running else R.color.warn))
+        }
+        findViewById<TextView>(R.id.settingsNavStatus)?.apply {
+            text = if (running) "●  Dock 服务已就绪" else "●  Dock 未运行"
+            setTextColor(ContextCompat.getColor(this@MainActivity,
+                if (running) R.color.settings_service_running else R.color.warn))
+        }
+        findViewById<View>(R.id.btnGrantOverlay).visibility = View.VISIBLE
+        findViewById<View>(R.id.btnGrantNotif).visibility = View.VISIBLE
 
         tvOverlayPerm.text = if (overlayOk) "已授权" else "未授权"
         tvOverlayPerm.setTextColor(permColor(overlayOk))
@@ -2475,7 +2758,7 @@ class MainActivity : AppCompatActivity() {
         minimumHeight = dp(40)
         setPadding(dp(10), dp(6), dp(10), dp(6))
         background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_button_primary)
-        setTextColor(0xFFFFFFFF.toInt())
+        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.settings_on_accent))
         setOnClickListener { onClick(this) }
     }
 
@@ -2484,30 +2767,24 @@ class MainActivity : AppCompatActivity() {
      * 选中项用强调色描边 + 强调色文字标示；点任意一项立即写设置并重建 Dock。
      */
     private fun addBgModeRow(parent: LinearLayout) {
-        parent.addView(TextView(this).apply {
-            text = "背景形态"
-            setTextColor(0xFFEDEFF3.toInt())
-            textSize = 13f
-            typeface = AppFont.bold(this@MainActivity)
-            setPadding(0, dp(14), 0, 0)
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val buttons = LinkedHashMap<BgMode, Button>()
+        val row = LinearLayout(this).apply {
+            id = R.id.settingsBgModeRow
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val buttons = backgroundModeTiles.apply { clear() }
         BgMode.values().forEach { m ->
-            val b = smallBtn(m.label) {
-                Prefs.setBgMode(this, m)
-                refreshBgModeButtons(buttons, m)
-                refreshGradientPreview()
-                reloadService()
+            val b = BackgroundModeTile(this, m).apply {
+                setOnClickListener {
+                    Prefs.setBgMode(this@MainActivity, m)
+                    refreshBgModeButtons(buttons, m)
+                    refreshGradientPreview()
+                    reloadService()
+                }
             }
-            b.textSize = 11.5f
             buttons[m] = b
             row.addView(b, LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginStart = dp(4) })
+                0, dp(142), 1f
+            ).apply { if (buttons.size > 1) marginStart = dp(16) })
         }
         parent.addView(row, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -2516,24 +2793,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 刷新背景形态按钮的选中态（互斥）+ 按形态显隐相关控件 */
-    private fun refreshBgModeButtons(buttons: Map<BgMode, Button>, selected: BgMode) {
+    private fun refreshBgModeButtons(buttons: Map<BgMode, BackgroundModeTile>, selected: BgMode) {
         for ((mode, b) in buttons) {
-            val on = mode == selected
-            b.setTextColor(if (on) 0xFF4EA1FF.toInt() else 0xFFFFFFFF.toInt())
-            b.alpha = if (on) 1f else 0.62f
-            b.background = if (on) {
-                // 选中：透明底 + 强调色描边（Button 没有 setStroke，用 GradientDrawable）
-                android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = dp(10).toFloat()
-                    setColor(0x1A4EA1FF)
-                    setStroke(dp(2), 0xFF4EA1FF.toInt())
-                }
-            } else {
-                ContextCompat.getDrawable(this, R.drawable.bg_button_primary)
-            }
+            b.isSelected = mode == selected
         }
-        // ★ v3.13.16：两个「底色透明度」滑杆 + 预览条**只属于纯色 / 渐变**；
-        //   透明形态没有任何底色参数，毛玻璃的色调是固定淡色 → 都隐藏。
+        // 纯色 / 渐变显示日夜透明度；现有试验参数只在「模糊」入口下显示。
         val showColorControls = selected == BgMode.SOLID || selected == BgMode.GRADIENT
         for (row in bgColorControlRows) {
             row.visibility = if (showColorControls) View.VISIBLE else View.GONE
@@ -2580,11 +2844,16 @@ class MainActivity : AppCompatActivity() {
         } else {
             if (tvLog.text.isEmpty()) tvLog.text = line else tvLog.append("\n$line")
         }
-        if (!scrollPending) {
+        if (!scrollPending && currentPage == SECTION_LOGS && svLog.isShown && currentFocus !is EditText &&
+            (svLog as? LogTailScrollView)?.shouldFollowTail() != false) {
             scrollPending = true
             main.post {
                 scrollPending = false
-                svLog.fullScroll(View.FOCUS_DOWN)
+                if (currentPage == SECTION_LOGS && svLog.isShown && currentFocus !is EditText &&
+                    (svLog as? LogTailScrollView)?.shouldFollowTail() != false) {
+                    // Keep following the log tail without moving focus or jumping the outer page.
+                    svLog.scrollTo(0, tvLog.height)
+                }
             }
         }
     }
