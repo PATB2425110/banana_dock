@@ -138,7 +138,7 @@ object Prefs {
     /**
      * ★ v1.4.96：**最近任务（后台应用列表）**入口包名。
      * 车机上实测是 `com.geely.recents`（日志里出现过「前台 com.geely.recents」）。
-     * D01「返回桌面」双击时打开它。
+     * D01「返回桌面」长按时打开它。
      */
     fun recentsPkg(ctx: Context) = sp(ctx).getString("recents_pkg", null) ?: com.car.dockbar.util.IntentLauncher.DEF_RECENTS_PKG
     fun setRecentsPkg(ctx: Context, v: String) =

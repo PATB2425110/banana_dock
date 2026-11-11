@@ -1,5 +1,12 @@
 package com.car.dockbar.ui
 
+import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockSnapshots
+import com.car.dockbar.dock.DockMetrics
+import com.car.dockbar.dock.SilentDockHost
+import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.levelIcon
+
 import android.content.ClipData
 import android.content.Context
 import android.graphics.Bitmap
@@ -74,68 +81,14 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
                 }
             }
         }
-        val factory = DockEntryViewFactory(ctx, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
-        val state = VehicleController.state
         // Match the live Dock's palette without changing its global foreground colors.
         val darkIcons = Color.red(DockIconView.fgColor) < 128
         items.forEach { entry ->
-            val built = factory.create(entry)
-            val value = built.valueView ?: built.view as? DockValueView
-            when (built.bind) {
-                BindKind.TEMP_DRIVER -> value?.renderTemp(state.driverTempC ?: Prefs.lastDriverTempC(ctx), muted = !state.acOn)
-                BindKind.TEMP_PASSENGER -> value?.renderTemp(state.passengerTempC ?: Prefs.lastPassengerTempC(ctx), muted = !state.acOn)
-                BindKind.FAN -> value?.renderFan(state.fanLevel, state.fanAuto)
-                BindKind.VOLUME -> (built.view as? VolumeDockButton)?.setLevel(CabinVolume.read(ctx, CabinVolume.MEDIA).value)
-                BindKind.RECIRC -> (built.view as? DockIconView)?.setIcon(
-                    if (state.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer)
-                BindKind.AIR -> (built.view as? DockIconView)?.setIcon(when (state.airDirection) {
-                    1 -> R.drawable.ic_blowing_face
-                    2 -> R.drawable.ic_blowing_foot
-                    3 -> R.drawable.ic_blowing_facefoot
-                    4 -> R.drawable.ic_blowing_window
-                    5 -> R.drawable.ic_blowing_face_and_window
-                    6 -> R.drawable.ic_blowing_foot_and_window
-                    7 -> R.drawable.ic_blowing_all
-                    else -> R.drawable.ic_blowing_off
-                })
-                BindKind.DEFROST_FRONT -> (built.view as? DockIconView)?.setActive(state.defrostFront)
-                BindKind.DEFROST_REAR -> (built.view as? DockIconView)?.setActive(state.defrostRear)
-                BindKind.SEAT_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.seatHeat) {
-                        1 -> if (darkIcons) R.drawable.ic_seat_hot_01_dark else R.drawable.ic_seat_hot_01
-                        2 -> if (darkIcons) R.drawable.ic_seat_hot_02_dark else R.drawable.ic_seat_hot_02
-                        3 -> if (darkIcons) R.drawable.ic_seat_hot_03_dark else R.drawable.ic_seat_hot_03
-                        else -> if (darkIcons) R.drawable.ic_seat_hot_off_dark else R.drawable.ic_seat_hot_off
-                    })
-                    setActive(state.seatHeat > 0)
-                }
-                BindKind.STEERING_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.steeringHeat) {
-                        1 -> if (darkIcons) R.drawable.ic_sw_heat_01_dark else R.drawable.ic_sw_heat_01
-                        2 -> if (darkIcons) R.drawable.ic_sw_heat_02_dark else R.drawable.ic_sw_heat_02
-                        3 -> if (darkIcons) R.drawable.ic_sw_heat_03_dark else R.drawable.ic_sw_heat_03
-                        else -> if (darkIcons) R.drawable.ic_sw_heat_off_dark else R.drawable.ic_sw_heat_off
-                    })
-                    setActive(state.steeringHeat > 0)
-                }
-                BindKind.VENT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.seatVent) {
-                        1 -> if (darkIcons) R.drawable.ic_seat_feng_01_dark else R.drawable.ic_seat_feng_01
-                        2 -> if (darkIcons) R.drawable.ic_seat_feng_02_dark else R.drawable.ic_seat_feng_02
-                        3 -> if (darkIcons) R.drawable.ic_seat_feng_03_dark else R.drawable.ic_seat_feng_03
-                        else -> if (darkIcons) R.drawable.ic_seat_feng_off_dark else R.drawable.ic_seat_feng_off
-                    })
-                    setActive(state.seatVent > 0)
-                }
-                BindKind.MUSIC -> (built.view as? DockMusicView)?.apply {
-                    val info = MediaBridge.info
-                    if (info.hasSession) render(info.title, info.artist, info.art, info.isPlaying) else renderEmpty()
-                }
-                else -> Unit
-            }
-            stripInteractions(built.view)
-            layout.addItem(built.view, built.span, built.separator, built.fixedWidthPx,
-                built.flexMinPx, built.flexMaxPx)
+            val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
+            val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)
+            mounted.widget.bind(mounted, DockSnapshots.capture(ctx, darkIcons))
+            layout.addItem(mounted.view, mounted.span, mounted.separator, mounted.fixedWidthPx,
+                mounted.flexMinPx, mounted.flexMaxPx)
         }
         layout.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
@@ -163,8 +116,8 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
     fun candidateBitmap(entry: DockEntry): Bitmap {
         val nativeWidth = when (Builtin.of(entry.action)) {
             Builtin.MUSIC -> 336
-            Builtin.FAN_COMBO -> DockEntryViewFactory.FAN_COMBO_FIXED_WIDTH_PX
-            else -> DockEntryViewFactory.fixedWidthFor(entry.span)
+            Builtin.FAN_COMBO -> DockMetrics.FAN_COMBO_FIXED_WIDTH_PX
+            else -> DockMetrics.fixedWidthFor(entry.span)
         }
         val sample = DockEditorPreviewView(context)
         sample.render(listOf(entry), nativeWidth)
@@ -173,17 +126,6 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
         return if (crop != null && crop.width() > 0 && crop.height() > 0)
             Bitmap.createBitmap(image, crop.left, crop.top, crop.width(), crop.height()) else image
     }
-
-    private fun stripInteractions(view: View) {
-        view.setOnClickListener(null)
-        view.setOnLongClickListener(null)
-        view.setOnTouchListener(null)
-        view.isClickable = false
-        view.isLongClickable = false
-        if (view is ViewGroup) repeat(view.childCount) { stripInteractions(view.getChildAt(it)) }
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { updateTarget() }
 
     private fun updateTarget() {
         val image = bitmap ?: return
