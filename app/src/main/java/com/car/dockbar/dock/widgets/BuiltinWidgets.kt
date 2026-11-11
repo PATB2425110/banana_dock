@@ -256,7 +256,7 @@ internal class MissingWidget(action: String) : DockWidget {
 
 internal object BuiltinWidgets {
     val all: List<DockWidget> = listOf(
-        iconWidget(Builtin.HOME, root(GestureBinding(tap = DockAction.GoHome, doubleTap = DockAction.OpenRecents)), iconScale = 0.8f),
+        iconWidget(Builtin.HOME, root(GestureBinding(tap = DockAction.GoHome, longPress = DockAction.OpenRecents)), iconScale = 0.8f),
         MusicWidget,
         iconWidget(Builtin.LYRIC, root(tapLong(DockAction.ToggleLyric, DockAction.OpenThisApp)), BindKind.LYRIC, lockSpan = true),
         VolumeWidget,

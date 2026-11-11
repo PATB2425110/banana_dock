@@ -30,12 +30,12 @@ class DockCatalogTest {
     }
 
     @Test
-    fun homeWaitsForADoubleTapAndRecircDoesNot() {
+    fun homeOpensRecentsOnLongPressAndRecircDoesNot() {
         val home = DockCatalog.of("home")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.GoHome, home.tap)
-        assertEquals(DockAction.OpenRecents, home.doubleTap)
-        assertNull(home.longPress)
-        assertEquals(300L, home.doubleWindowMs)
+        assertEquals(DockAction.OpenRecents, home.longPress)
+        assertNull(home.doubleTap)
+        assertEquals(0L, home.doubleWindowMs)
 
         val recirc = DockCatalog.of("recirc")!!.defaultGestures()[HitTargets.ROOT]!!
         assertEquals(DockAction.ToggleRecirc, recirc.tap)
@@ -63,7 +63,7 @@ class DockCatalogTest {
     @Test
     fun defaultGesturesMatchTheCurrentDock() {
         val expected = mapOf(
-            "home" to "root:goHome/double:openRecents",
+            "home" to "root:goHome/long:openRecents",
             "settings" to "root:openCarSettings/long:openDockSettings",
             "app_drawer" to "root:showPopup:appDrawer/long:openAppDrawerSettings",
             "seat" to "root:showPopup:seat",
