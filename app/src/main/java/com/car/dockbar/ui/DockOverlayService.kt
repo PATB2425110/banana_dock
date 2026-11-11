@@ -1,6 +1,8 @@
 package com.car.dockbar.ui
 
 import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.BindKind
+import com.car.dockbar.dock.DockCatalog
 import com.car.dockbar.dock.DockHost
 import com.car.dockbar.dock.levelIcon
 
@@ -504,46 +506,31 @@ class DockOverlayService : Service() {
         applyBackground(layout)
 
         // 按用户配置的条目动态构建（支持自定义应用增删、排序）
-        val factory = DockEntryViewFactory(
-            ctx,
-            onInteraction = { onUserInteraction() },
-            // 风速点击同样打开系统原生空调窗口（与温度一致，不再用自绘面板）
-            onShowHvac = { toggleSystemHvacWindow() },
-            onToggleHvac = { toggleSystemHvacWindow() },
-            onShowAirDirection = { v -> showAirDirectionPopup(v) },
-            onToggleDualSync = { toggleDualSync() },
-            onShowAppDrawer = { v -> showAppDrawer(v) },
-            // ★ v1.4.97 #10：长按 D05 → 直接打开设置里的「选择快捷应用」界面
-            onOpenAppDrawerSettings = { openAppDrawerSettings() },
-            onShowAirQuality = { v, isDriver -> showAirQualityPopup(v, isDriver) },
-            onToggleAcLong = { toggleAcFromDock() },
-            onShowSeatPopup = { v -> showSeatPopup(v) },
-            onShowVolume = { v -> showVolumePopup(v) },
-            iconScale = iconScale
-        )
+        val host = ServiceDockHost()
+        val iconPx = (65 * iconScale).toInt().coerceAtLeast(12)
         val entries: List<DockEntry> = DockEntries.load(ctx)
         for (e in entries) {
-            val built = factory.create(e)
+            val mounted = DockCatalog.mount(ctx, e, host, attachGestures = true, iconPx = iconPx)
             layout.addItem(
-                built.view, built.span, built.separator,
-                built.fixedWidthPx, built.flexMinPx, built.flexMaxPx
+                mounted.view, mounted.span, mounted.separator,
+                mounted.fixedWidthPx, mounted.flexMinPx, mounted.flexMaxPx
             )
-            when (built.bind) {
-                // ★ 组合控件（− 值 +）的数值 View 在 built.valueView 里；
-                //   独立值条目兜底直接取 built.view
-                BindKind.TEMP_DRIVER -> (built.valueView ?: built.view as? DockValueView)?.let { tempDriverViews += it }
-                BindKind.TEMP_PASSENGER -> (built.valueView ?: built.view as? DockValueView)?.let { tempPassengerViews += it }
-                BindKind.FAN -> (built.valueView ?: built.view as? DockValueView)?.let { fanViews += it }
-                BindKind.MUSIC -> musicViews += built.view as DockMusicView
-                BindKind.LYRIC -> lyricViews += built.view as DockIconView
-                BindKind.RECIRC -> recircViews += built.view as DockIconView
-                BindKind.VENT -> ventViews += built.view as DockIconView
-                BindKind.SEAT_HEAT -> seatHeatViews += built.view as DockIconView
-                BindKind.AIR -> airViews += built.view as DockIconView
-                BindKind.DEFROST_FRONT -> defrostFrontViews += built.view as DockIconView
-                BindKind.DEFROST_REAR -> defrostRearViews += built.view as DockIconView
-                BindKind.STEERING_HEAT -> steeringHeatViews += built.view as DockIconView
-                BindKind.VOLUME -> volumeViews += built.view as VolumeDockButton
+            when (mounted.bindKind) {
+                // ★ 组合控件（− 值 +）的数值 View 在 mounted.valueView 里；
+                //   独立值条目兜底直接取 mounted.view
+                BindKind.TEMP_DRIVER -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { tempDriverViews += it }
+                BindKind.TEMP_PASSENGER -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { tempPassengerViews += it }
+                BindKind.FAN -> (mounted.valueView ?: mounted.view as? DockValueView)?.let { fanViews += it }
+                BindKind.MUSIC -> musicViews += mounted.view as DockMusicView
+                BindKind.LYRIC -> lyricViews += mounted.view as DockIconView
+                BindKind.RECIRC -> recircViews += mounted.view as DockIconView
+                BindKind.VENT -> ventViews += mounted.view as DockIconView
+                BindKind.SEAT_HEAT -> seatHeatViews += mounted.view as DockIconView
+                BindKind.AIR -> airViews += mounted.view as DockIconView
+                BindKind.DEFROST_FRONT -> defrostFrontViews += mounted.view as DockIconView
+                BindKind.DEFROST_REAR -> defrostRearViews += mounted.view as DockIconView
+                BindKind.STEERING_HEAT -> steeringHeatViews += mounted.view as DockIconView
+                BindKind.VOLUME -> volumeViews += mounted.view as VolumeDockButton
                 BindKind.NONE -> {}
             }
         }

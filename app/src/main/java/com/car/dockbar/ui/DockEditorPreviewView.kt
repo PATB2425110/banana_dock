@@ -1,5 +1,9 @@
 package com.car.dockbar.ui
 
+import com.car.dockbar.dock.BindKind
+import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.DockMetrics
+import com.car.dockbar.dock.SilentDockHost
 import com.car.dockbar.dock.airDirectionIcon
 import com.car.dockbar.dock.levelIcon
 
@@ -77,14 +81,15 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
                 }
             }
         }
-        val factory = DockEntryViewFactory(ctx, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
         val state = VehicleController.state
         // Match the live Dock's palette without changing its global foreground colors.
         val darkIcons = Color.red(DockIconView.fgColor) < 128
         items.forEach { entry ->
-            val built = factory.create(entry)
+            val iconPx = (65 * Prefs.iconScale(ctx)).toInt().coerceAtLeast(12)
+            val mounted = DockCatalog.mount(ctx, entry, SilentDockHost, attachGestures = false, iconPx)
+            val built = mounted
             val value = built.valueView ?: built.view as? DockValueView
-            when (built.bind) {
+            when (mounted.bindKind) {
                 BindKind.TEMP_DRIVER -> value?.renderTemp(state.driverTempC ?: Prefs.lastDriverTempC(ctx), muted = !state.acOn)
                 BindKind.TEMP_PASSENGER -> value?.renderTemp(state.passengerTempC ?: Prefs.lastPassengerTempC(ctx), muted = !state.acOn)
                 BindKind.FAN -> value?.renderFan(state.fanLevel, state.fanAuto)
@@ -142,8 +147,8 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
     fun candidateBitmap(entry: DockEntry): Bitmap {
         val nativeWidth = when (Builtin.of(entry.action)) {
             Builtin.MUSIC -> 336
-            Builtin.FAN_COMBO -> DockEntryViewFactory.FAN_COMBO_FIXED_WIDTH_PX
-            else -> DockEntryViewFactory.fixedWidthFor(entry.span)
+            Builtin.FAN_COMBO -> DockMetrics.FAN_COMBO_FIXED_WIDTH_PX
+            else -> DockMetrics.fixedWidthFor(entry.span)
         }
         val sample = DockEditorPreviewView(context)
         sample.render(listOf(entry), nativeWidth)

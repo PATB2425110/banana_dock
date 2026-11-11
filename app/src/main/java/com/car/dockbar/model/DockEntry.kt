@@ -47,7 +47,7 @@ data class DockEntry(
 }
 
 /**
- * 内置控件清单。每个 action 对应一个 View，由 [com.car.dockbar.ui.DockEntryViewFactory] 生成。
+ * 内置控件清单。每个 action 对应一个 View，由 [com.car.dockbar.dock.DockCatalog] 生成。
  *
  * 顺序即默认 Dock 的默认排布，与原硬编码版本完全一致（音乐卡片占 3 槽）。
  */
