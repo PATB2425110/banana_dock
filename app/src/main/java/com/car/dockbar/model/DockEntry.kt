@@ -1,6 +1,7 @@
 package com.car.dockbar.model
 
 import android.content.Context
+import com.car.dockbar.dock.DockCatalog
 import com.car.dockbar.dock.GestureMaps
 import com.car.dockbar.dock.GesturePatch
 import com.car.dockbar.util.Prefs
@@ -272,15 +273,17 @@ object DockEntries {
 
     fun reset(ctx: Context) = save(ctx, defaults())
 
-    /** 追加一个内置控件（已存在则忽略，避免重复堆叠） */
-    fun addBuiltin(ctx: Context, b: Builtin): List<DockEntry> {
+    fun addWidget(ctx: Context, action: String): List<DockEntry> {
+        val widget = DockCatalog.of(action) ?: return load(ctx)
         val list = load(ctx)
-        if (list.none { it.kind == "builtin" && it.action == b.action }) {
-            list.add(DockEntry("b_${b.action}", "builtin", b.action, b.label, span = b.span))
+        if (list.none { it.kind == "builtin" && it.action == widget.spec.action }) {
+            list.add(DockEntry("b_${widget.spec.action}", "builtin", widget.spec.action, widget.spec.label, span = widget.spec.span))
             save(ctx, list)
         }
         return list
     }
+
+    fun addBuiltin(ctx: Context, b: Builtin): List<DockEntry> = addWidget(ctx, b.action)
 
     /** 追加一个自定义 App；同包名可重复添加（比如放两个音乐入口） */
     fun addApp(ctx: Context, label: String, pkg: String, cls: String): List<DockEntry> {

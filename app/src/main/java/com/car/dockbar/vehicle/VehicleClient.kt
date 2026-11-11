@@ -22,7 +22,7 @@ import com.car.dockbar.util.Prefs
  * 这样即使车控 native 崩溃，也只是 `:car` 进程死掉，Dock 本身不受影响。
  *
  * 对外暴露的接口刻意与 [VehicleController] 保持一致（同名方法），
- * 这样 UI 层（DockOverlayService / DockEntryViewFactory / MainActivity）几乎不用改。
+ * 这样 UI 层（DockOverlayService / DockCatalog / MainActivity）几乎不用改。
  */
 object VehicleClient {
 
