@@ -65,9 +65,13 @@ object Prefs {
     fun bgColor(ctx: Context) = sp(ctx).getInt("bg_color", 0x000000)
     fun setBgColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("bg_color", v).apply()
 
-    /** 圆角半径（px） */
-    fun cornerRadiusPx(ctx: Context) = sp(ctx).getInt("corner_radius_px", 14)
-    fun setCornerRadiusPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("corner_radius_px", v).apply()
+    /**
+     * 圆角半径（px）。默认直角。
+     * 换键以丢掉旧的 14px 默认值；外观页滑条仍可另存新值。
+     */
+    fun cornerRadiusPx(ctx: Context) = sp(ctx).getInt("corner_radius_px_square", 0)
+    fun setCornerRadiusPx(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("corner_radius_px_square", v).apply()
 
     /** 是否画分组竖分隔线 */
     fun showSeparators(ctx: Context) = sp(ctx).getBoolean("show_separators", true)
@@ -107,7 +111,6 @@ object Prefs {
     private val DEF_HVAC_CLS get() = com.car.dockbar.util.IntentLauncher.DEF_HVAC_CLS
     private val DEF_SEAT_PKG get() = com.car.dockbar.util.IntentLauncher.DEF_SEAT_PKG
     private val DEF_SEAT_CLS get() = com.car.dockbar.util.IntentLauncher.DEF_SEAT_CLS
-    private val DEF_MUSIC_PKG get() = com.car.dockbar.util.IntentLauncher.DEF_MUSIC_PKG
 
     /** ③ 车机设置 App：包名 / Activity */
     fun settingsPkg(ctx: Context) = sp(ctx).getString("settings_pkg", null) ?: DEF_SETTINGS_PKG
@@ -131,9 +134,6 @@ object Prefs {
     fun airDirPkg(ctx: Context) = sp(ctx).getString("airdir_pkg", null) ?: DEF_HVAC_PKG
     fun airDirCls(ctx: Context) = sp(ctx).getString("airdir_cls", null) ?: DEF_HVAC_CLS
     fun airDirAction(ctx: Context) = sp(ctx).getString("airdir_action", null) ?: ""
-
-    /** ② 音乐卡片在没有媒体会话时的兜底播放器 */
-    fun musicPkg(ctx: Context) = sp(ctx).getString("music_pkg", null) ?: DEF_MUSIC_PKG
 
     /**
      * ★ v1.4.96：**最近任务（后台应用列表）**入口包名。
