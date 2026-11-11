@@ -65,9 +65,13 @@ object Prefs {
     fun bgColor(ctx: Context) = sp(ctx).getInt("bg_color", 0x000000)
     fun setBgColor(ctx: Context, v: Int) = sp(ctx).edit().putInt("bg_color", v).apply()
 
-    /** 圆角半径（px） */
-    fun cornerRadiusPx(ctx: Context) = sp(ctx).getInt("corner_radius_px", 14)
-    fun setCornerRadiusPx(ctx: Context, v: Int) = sp(ctx).edit().putInt("corner_radius_px", v).apply()
+    /**
+     * 圆角半径（px）。默认直角。
+     * 换键以丢掉旧的 14px 默认值；外观页滑条仍可另存新值。
+     */
+    fun cornerRadiusPx(ctx: Context) = sp(ctx).getInt("corner_radius_px_square", 0)
+    fun setCornerRadiusPx(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("corner_radius_px_square", v).apply()
 
     /** 是否画分组竖分隔线 */
     fun showSeparators(ctx: Context) = sp(ctx).getBoolean("show_separators", true)
