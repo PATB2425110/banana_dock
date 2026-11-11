@@ -1,5 +1,8 @@
 package com.car.dockbar.ui
 
+import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.levelIcon
+
 import android.content.ClipData
 import android.content.Context
 import android.graphics.Bitmap
@@ -88,43 +91,19 @@ internal class DockEditorPreviewView(context: Context) : View(context) {
                 BindKind.VOLUME -> (built.view as? VolumeDockButton)?.setLevel(CabinVolume.read(ctx, CabinVolume.MEDIA).value)
                 BindKind.RECIRC -> (built.view as? DockIconView)?.setIcon(
                     if (state.recircInside) R.drawable.ic_ac_cycle_inner else R.drawable.ic_ac_cycle_outer)
-                BindKind.AIR -> (built.view as? DockIconView)?.setIcon(when (state.airDirection) {
-                    1 -> R.drawable.ic_blowing_face
-                    2 -> R.drawable.ic_blowing_foot
-                    3 -> R.drawable.ic_blowing_facefoot
-                    4 -> R.drawable.ic_blowing_window
-                    5 -> R.drawable.ic_blowing_face_and_window
-                    6 -> R.drawable.ic_blowing_foot_and_window
-                    7 -> R.drawable.ic_blowing_all
-                    else -> R.drawable.ic_blowing_off
-                })
+                BindKind.AIR -> (built.view as? DockIconView)?.setIcon(airDirectionIcon(state.airDirection))
                 BindKind.DEFROST_FRONT -> (built.view as? DockIconView)?.setActive(state.defrostFront)
                 BindKind.DEFROST_REAR -> (built.view as? DockIconView)?.setActive(state.defrostRear)
                 BindKind.SEAT_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.seatHeat) {
-                        1 -> if (darkIcons) R.drawable.ic_seat_hot_01_dark else R.drawable.ic_seat_hot_01
-                        2 -> if (darkIcons) R.drawable.ic_seat_hot_02_dark else R.drawable.ic_seat_hot_02
-                        3 -> if (darkIcons) R.drawable.ic_seat_hot_03_dark else R.drawable.ic_seat_hot_03
-                        else -> if (darkIcons) R.drawable.ic_seat_hot_off_dark else R.drawable.ic_seat_hot_off
-                    })
+                    setIcon(levelIcon("seatHeat", state.seatHeat, darkIcons))
                     setActive(state.seatHeat > 0)
                 }
                 BindKind.STEERING_HEAT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.steeringHeat) {
-                        1 -> if (darkIcons) R.drawable.ic_sw_heat_01_dark else R.drawable.ic_sw_heat_01
-                        2 -> if (darkIcons) R.drawable.ic_sw_heat_02_dark else R.drawable.ic_sw_heat_02
-                        3 -> if (darkIcons) R.drawable.ic_sw_heat_03_dark else R.drawable.ic_sw_heat_03
-                        else -> if (darkIcons) R.drawable.ic_sw_heat_off_dark else R.drawable.ic_sw_heat_off
-                    })
+                    setIcon(levelIcon("steeringHeat", state.steeringHeat, darkIcons))
                     setActive(state.steeringHeat > 0)
                 }
                 BindKind.VENT -> (built.view as? DockIconView)?.apply {
-                    setIcon(when (state.seatVent) {
-                        1 -> if (darkIcons) R.drawable.ic_seat_feng_01_dark else R.drawable.ic_seat_feng_01
-                        2 -> if (darkIcons) R.drawable.ic_seat_feng_02_dark else R.drawable.ic_seat_feng_02
-                        3 -> if (darkIcons) R.drawable.ic_seat_feng_03_dark else R.drawable.ic_seat_feng_03
-                        else -> if (darkIcons) R.drawable.ic_seat_feng_off_dark else R.drawable.ic_seat_feng_off
-                    })
+                    setIcon(levelIcon("vent", state.seatVent, darkIcons))
                     setActive(state.seatVent > 0)
                 }
                 BindKind.MUSIC -> (built.view as? DockMusicView)?.apply {

@@ -1,5 +1,8 @@
 package com.car.dockbar.ui
 
+import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.levelIcon
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -1490,35 +1493,19 @@ class DockOverlayService : Service() {
         // ★ v3.1：主驾座椅通风 —— 改用系统 Dock 的 ic_seat_feng_left_01/02/03_normal + _off_normal
         // ★ v3.3：白天模式（亮背景）换深色版，否则白座椅掉在白底上看不见
         ventViews.forEach {
-            val dark = !darkText
-            it.setIcon(
-                when (st.seatVent) {
-                    1 -> if (dark) R.drawable.ic_seat_feng_01_dark else R.drawable.ic_seat_feng_01
-                    2 -> if (dark) R.drawable.ic_seat_feng_02_dark else R.drawable.ic_seat_feng_02
-                    3 -> if (dark) R.drawable.ic_seat_feng_03_dark else R.drawable.ic_seat_feng_03
-                    else -> if (dark) R.drawable.ic_seat_feng_off_dark else R.drawable.ic_seat_feng_off
-                }
-            )
+            it.setIcon(levelIcon("vent", st.seatVent, !darkText))
             it.setActive(st.seatVent > 0)
         }
         // ★ v3.1：主驾座椅加热 —— 改成**按档位换图**（热浪数量 1/2/3 跟着档位走），
         //   之前是固定一张 3 档图，所以热浪永远只显示 3 条。
         // ★ v3.3：白天模式换深色版
         seatHeatViews.forEach {
-            val dark = !darkText
-            it.setIcon(
-                when (st.seatHeat) {
-                    1 -> if (dark) R.drawable.ic_seat_hot_01_dark else R.drawable.ic_seat_hot_01
-                    2 -> if (dark) R.drawable.ic_seat_hot_02_dark else R.drawable.ic_seat_hot_02
-                    3 -> if (dark) R.drawable.ic_seat_hot_03_dark else R.drawable.ic_seat_hot_03
-                    else -> if (dark) R.drawable.ic_seat_hot_off_dark else R.drawable.ic_seat_hot_off
-                }
-            )
+            it.setIcon(levelIcon("seatHeat", st.seatHeat, !darkText))
             it.setActive(st.seatHeat > 0)
         }
         // 风向：7 种组合（吹脸/吹脚/吹前挡 及其组合）各自点亮对应箭头
         // ★ v1.5.13：改用系统 Dock 的 ic_blowing_* 静态矢量（按位掩码选图），不再自绘
-        airViews.forEach { it.setIcon(airResOf(st.airDirection)) }
+        airViews.forEach { it.setIcon(airDirectionIcon(st.airDirection)) }
         // ★ v1.5.11 #13：前挡加热 —— 开启时点亮强调色
         defrostFrontViews.forEach { it.setActive(st.defrostFront) }
         // ★ v3.1：后挡除霜 —— 开启时点亮强调色
@@ -1526,40 +1513,12 @@ class DockOverlayService : Service() {
         // ★ v3.1：方向盘加热 —— 按档位换图（0=关 1/2/3 档图标不同）
         // ★ v3.3：白天模式换深色版
         steeringHeatViews.forEach {
-            val dark = !darkText
-            it.setIcon(
-                when (st.steeringHeat) {
-                    1 -> if (dark) R.drawable.ic_sw_heat_01_dark else R.drawable.ic_sw_heat_01
-                    2 -> if (dark) R.drawable.ic_sw_heat_02_dark else R.drawable.ic_sw_heat_02
-                    3 -> if (dark) R.drawable.ic_sw_heat_03_dark else R.drawable.ic_sw_heat_03
-                    else -> if (dark) R.drawable.ic_sw_heat_off_dark else R.drawable.ic_sw_heat_off
-                }
-            )
+            it.setIcon(levelIcon("steeringHeat", st.steeringHeat, !darkText))
             it.setActive(st.steeringHeat > 0)
         }
         onAcStateChanged(st)
         // ★ v1.4.44：长按主驾温度（切 AC）时不再显示 Dock 上方的状态小字（用户要求取消）；
         //   状态小字只保留「长按副驾温度切双温同步」这一处触发
-    }
-
-    /**
-     * ★ v1.5.13：风向位掩码 → 系统 Dock 的 `ic_blowing_*` 矢量。
-     * 掩码：1 = 吹脸(FACE)  2 = 吹脚(FOOT)  4 = 吹前挡(DEFROST)（与旧 AirFlowDrawable 一致）。
-     */
-    private fun airResOf(mode: Int): Int {
-        val face = mode and 0x1 != 0
-        val foot = mode and 0x2 != 0
-        val win = mode and 0x4 != 0
-        return when {
-            face && foot && win -> R.drawable.ic_blowing_all
-            face && foot -> R.drawable.ic_blowing_facefoot
-            face && win -> R.drawable.ic_blowing_face_and_window
-            foot && win -> R.drawable.ic_blowing_foot_and_window
-            face -> R.drawable.ic_blowing_face
-            foot -> R.drawable.ic_blowing_foot
-            win -> R.drawable.ic_blowing_window
-            else -> R.drawable.ic_blowing_off
-        }
     }
 
     // （v1.4.46：Dock 上方状态小字已全部移除——refreshLongPressLabel 连同触发点一并删除）
