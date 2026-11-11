@@ -1,6 +1,7 @@
 package com.car.dockbar.ui
 
 import com.car.dockbar.dock.airDirectionIcon
+import com.car.dockbar.dock.DockHost
 import com.car.dockbar.dock.levelIcon
 
 import android.app.Notification
@@ -1584,6 +1585,24 @@ class DockOverlayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .build()
+    }
+
+
+    private inner class ServiceDockHost : DockHost {
+        override fun onGesture() = onUserInteraction()
+        override fun showPopup(popup: String, anchor: android.view.View) {
+            when (popup) {
+                "airDirection" -> showAirDirectionPopup(anchor)
+                "appDrawer" -> showAppDrawer(anchor)
+                "temperatureDriver" -> showAirQualityPopup(anchor, true)
+                "temperaturePassenger" -> showAirQualityPopup(anchor, false)
+                "volume" -> showVolumePopup(anchor)
+                "seat" -> showSeatPopup(anchor)
+            }
+        }
+        override fun toggleHvacWindow() = toggleSystemHvacWindow()
+        override fun toggleAcFromDock() = this@DockOverlayService.toggleAcFromDock()
+        override fun toggleDualSyncFromDock() = toggleDualSync()
     }
 
     @Suppress("unused")
