@@ -133,18 +133,28 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*.apk)
+          if [[ ${#apks[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one release APK under app/build/outputs/apk/release, found ${#apks[@]}."
+            ls -la app/build/outputs/apk/release || true
+            exit 1
+          fi
+          apk="${apks[0]}"
+          echo "Signing $apk"
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign \
             --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
-            --v4-signing-enabled false --out "$RUNNER_TEMP/CarDockBar-release.apk" \
-            app/build/outputs/apk/release/CarDockBar-release.apk
-          mv "$RUNNER_TEMP/CarDockBar-release.apk" app/build/outputs/apk/release/CarDockBar-release.apk
+            --v4-signing-enabled false --out "$RUNNER_TEMP/signed-release.apk" \
+            "$apk"
+          mv "$RUNNER_TEMP/signed-release.apk" "$apk"
+          echo "SIGNED_APK=$apk" >> "$GITHUB_ENV"
 
       - name: Verify APK and create update metadata
         shell: bash
         run: |
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose \
-            app/build/outputs/apk/release/CarDockBar-release.apk
+            "$SIGNED_APK"
           python3 - <<'PY'
           import hashlib
           import json
@@ -156,7 +166,7 @@ jobs:
           from pathlib import Path
           from urllib.parse import quote
 
-          source = Path('app/build/outputs/apk/release/CarDockBar-release.apk')
+          source = Path(os.environ['SIGNED_APK'])
           aapt = Path(os.environ['ANDROID_HOME']) / 'build-tools/34.0.0/aapt'
           badging = subprocess.check_output([str(aapt), 'dump', 'badging', str(source)], encoding='utf-8')
           package = re.search(
