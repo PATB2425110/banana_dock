@@ -1,11 +1,17 @@
 # CarDockBar 项目交接文档（Handoff）
 
-> 写给接手本项目的下一位 AI。本文档汇总了截至 2026-10-15 的全部已知事实、已验证结论、改动历史与未决问题。  
+> **2026-11-11 当前状态说明**：本文后续章节大部分为历史排查记录，包含旧版本的崩溃结论、构建要求与功能状态，不应直接当作当前故障。当前版本、实现与约束请先读 [CURRENT_STATUS.md](CURRENT_STATUS.md) 和 [README.md](README.md)。历史资料保留，不覆盖或删除原始结论。
+
+> 写给接手本项目的下一位 AI。本文档汇总了当前版本的已知事实、已验证结论、改动历史与未决问题。
 > 配套记忆文件在 `C:/Users/17900/WorkBuddy/2026-10-10-19-02-51/.workbuddy/memory/`（按日期归档），本文件是综合提炼版。
 
 ---
 
 ## 0. 一句话现状
+
+- 当前版本 **4.0**（versionCode 434），应用名 `Banana_Dock`，包名 `com.car.dockbar`。
+- 当前交付包名为 `Banana_Dock-4.0.apk`；设置页、诊断页、常驻应用页和 Dock 图标管理页已完成新版布局。
+- GitHub 仓库：`https://github.com/PATB2425110/banana_dock.git`，主分支为 `master`。
 
 - ✅ **温度显示已修对**：确认本车 HVAC 温度是整数原始值 × 0.2℃（如 128→25.6℃、119→23.8℃），开关用 10/11 枚举。
 - ❌ **仍「打开约 1 秒就闪退」**：根因高度怀疑是 `registerWatcher` 用**动态代理**注册到 ECarX 原生 HAL，系统第一次回调时触发 **native 层崩溃**（Java 层 `runCatching` 兜不住）。
@@ -22,10 +28,10 @@
 | 项目路径      | `C:/Users/17900/WorkBuddy/2026-10-07-19-43-58/CarDockBar/`                                                                                                        |
 | 应用包名      | `com.car.dockbar`（`app/build.gradle` 中 `namespace` / `applicationId`）                                                                                             |
 | 形态        | Android 车机（Automotive / ECarX）悬浮 Dock 栏 + 调试 Activity                                                                                                             |
-| 构建        | Gradle wrapper；**需 JDK 11+**，用 Android Studio 自带 JBR：<br />`export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" && export PATH="$JAVA_HOME/bin:$PATH"` |
+| 构建        | Gradle wrapper；当前 Java/Kotlin 目标为 **17**，使用 Android Studio 自带 JBR；旧版 JDK 要求只适用于历史构建 |
 | 构建命令      | 项目根目录下 `./gradlew assembleDebug --no-daemon`                                                                                                                      |
-| 产物        | `app/build/outputs/apk/debug/CarDockBar-debug.apk`（约 7.9 MB）                                                                                                      |
-| 当前已交付 APK | 2026-10-15 ~19:58 构建（含下面第 6 节改动，BUILD SUCCESSFUL）                                                                                                                 |
+| 产物        | `app/build/outputs/apk/release/Banana_Dock-4.0.apk`；Debug 为 `Banana_Dock-4.0-debug.apk`                                                                                                      |
+| 当前已交付 APK | `Banana_Dock-4.0.apk`（Release，versionCode 434）                                                                                                                 |
 | 权限        | `INTERNET`、`ACCESS_NETWORK_STATE` 已在 Manifest；debug 包可 `run-as`                                                                                                   |
 | 模拟模式      | `Prefs.simulate=true` 时不连车控，用假数据调 UI                                                                                                                              |
 
@@ -33,13 +39,24 @@
 
 ## 2. 应用功能概览
 
-- **悬浮 Dock 栏**（`TYPE_APPLICATION_OVERLAY`）：常驻车机屏幕底部/顶部，展示
+- **悬浮 Dock 栏**（`TYPE_APPLICATION_OVERLAY`）：常驻车机屏幕底部，展示
   - 主驾/副驾温度、风量（手动档/AUTO）、内外循环、座椅通风/加热、风向；
   - 音乐卡片（封面/歌名/歌手/播放暂停）；
   - 歌词悬浮窗（独立 `LyricOverlayService`）。
 - **车控读写**：通过厂商 HAL 读/写空调、座椅。编译期**不依赖任何厂商 jar**，全靠反射（`VehicleBridge`）。
 - **媒体**：`MediaSessionManager.getActiveSessions()` + `NotificationListenerService`（需要「通知使用权」权限）。
 - **调试页** `MainActivity`：车控通道表（每通道 读/写 按钮 + 原始 hex）、各项设置、崩溃日志显示。
+
+### 当前设置页结构
+
+- `悬浮 Dock 栏`：窗口尺寸、运行权限、显示与唤出。
+- `外观与风格`：背景形态、比例、日夜透明度、分隔线。
+- `Dock 图标管理`：实际 Dock 预览、长按拖拽添加/排序/移除、第三方应用独立添加。
+- `歌词悬浮窗`：歌词显示和来源设置。
+- `常驻应用设置`：实际安装应用的系统/个人双栏网格、搜索、常驻勾选。
+- `诊断与日志`：运行概况、诊断结果、上传、车控开关、诊断操作和可手动滚动的日志。
+
+设置页内容底部固定让出 128px 给 Dock，页面整体使用 0.9 倍显示；日志/车控开关的设置行为没有因 UI 重排而改变。
 
 ---
 
@@ -519,4 +536,3 @@ HVAC App 持有 `WRITE_SECURE_SETTINGS` / `INTERACT_ACROSS_USERS` 等特权 —�
 5. 温度可信区间 `10..40℃`（挡掉空调关闭时的伪值 5.0）。
 
 ### 14.6 修复前的 3 个实现缺陷（已一并修好）
-
