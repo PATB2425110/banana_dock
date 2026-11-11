@@ -377,7 +377,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<EditText>(R.id.etSeatAction).setText(Prefs.seatAction(this))
         findViewById<EditText>(R.id.etAirPkg).setText(Prefs.airDirPkg(this))
         findViewById<EditText>(R.id.etAirCls).setText(Prefs.airDirCls(this))
-        findViewById<EditText>(R.id.etMusicPkg).setText(Prefs.musicPkg(this))
         // ── [S34] 最近任务包名（D01 长按打开）────────
         findViewById<EditText>(R.id.etRecentsPkg).setText(Prefs.recentsPkg(this))
 
@@ -2487,12 +2486,10 @@ class MainActivity : AppCompatActivity() {
         Prefs.putString(this, "seat_action", findViewById<EditText>(R.id.etSeatAction).text.toString().trim())
         Prefs.putString(this, "airdir_pkg", findViewById<EditText>(R.id.etAirPkg).text.toString().trim())
         Prefs.putString(this, "airdir_cls", findViewById<EditText>(R.id.etAirCls).text.toString().trim())
-        Prefs.putString(this, "music_pkg", findViewById<EditText>(R.id.etMusicPkg).text.toString().trim())
         Prefs.putString(this, "recents_pkg", findViewById<EditText>(R.id.etRecentsPkg).text.toString().trim())
         Logx.d("入口：设置=${Prefs.settingsPkg(this)}/${Prefs.settingsCls(this)}")
         Logx.d("入口：空调=${Prefs.airDirPkg(this)}/${Prefs.airDirCls(this)}")
         Logx.d("入口：座椅=${Prefs.seatPkg(this)}/${Prefs.seatCls(this)}")
-        Logx.d("入口：音乐兜底=${Prefs.musicPkg(this)}")
     }
 
     // =====================================================================

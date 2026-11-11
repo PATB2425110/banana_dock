@@ -591,26 +591,6 @@
                 android:textColorHint="@color/text_secondary"
                 android:textSize="13sp" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="② 音乐卡片：无媒体会话时的兜底播放器"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp" />
-
-            <EditText
-                android:id="@+id/etMusicPkg"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:background="@drawable/bg_field"
-                android:hint="包名（默认 com.kugou.android.auto）"
-                android:inputType="text"
-                android:padding="8dp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_secondary"
-                android:textSize="13sp" />
 
             <TextView
                 android:layout_width="match_parent"

@@ -3,11 +3,13 @@ package com.car.dockbar.dock
 import android.content.Context
 import android.content.Intent
 import android.view.View
+import android.widget.Toast
 import com.car.dockbar.hvac.HvacApp
 import com.car.dockbar.media.MediaBridge
 import com.car.dockbar.ui.LyricWindows
 import com.car.dockbar.ui.MainActivity
 import com.car.dockbar.util.IntentLauncher
+import com.car.dockbar.util.Logx
 import com.car.dockbar.vehicle.VehicleController
 
 object DockActions {
@@ -61,11 +63,8 @@ object DockActions {
             DockAction.ToggleLyric -> LyricWindows.toggle(ctx)
             DockAction.OpenPlayer -> {
                 if (!MediaBridge.openPlayer(ctx)) {
-                    IntentLauncher.launch(
-                        ctx, "音乐",
-                        IntentLauncher.musicTarget(ctx),
-                        IntentLauncher.MUSIC_CANDIDATES,
-                    )
+                    Logx.d("媒体：没有可打开的播放器")
+                    Toast.makeText(ctx.applicationContext, "当前没有可打开的播放器", Toast.LENGTH_SHORT).show()
                 }
             }
             DockAction.PlayPause -> MediaBridge.playPause()

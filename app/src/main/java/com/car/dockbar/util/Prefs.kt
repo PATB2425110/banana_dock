@@ -107,7 +107,6 @@ object Prefs {
     private val DEF_HVAC_CLS get() = com.car.dockbar.util.IntentLauncher.DEF_HVAC_CLS
     private val DEF_SEAT_PKG get() = com.car.dockbar.util.IntentLauncher.DEF_SEAT_PKG
     private val DEF_SEAT_CLS get() = com.car.dockbar.util.IntentLauncher.DEF_SEAT_CLS
-    private val DEF_MUSIC_PKG get() = com.car.dockbar.util.IntentLauncher.DEF_MUSIC_PKG
 
     /** ③ 车机设置 App：包名 / Activity */
     fun settingsPkg(ctx: Context) = sp(ctx).getString("settings_pkg", null) ?: DEF_SETTINGS_PKG
@@ -131,9 +130,6 @@ object Prefs {
     fun airDirPkg(ctx: Context) = sp(ctx).getString("airdir_pkg", null) ?: DEF_HVAC_PKG
     fun airDirCls(ctx: Context) = sp(ctx).getString("airdir_cls", null) ?: DEF_HVAC_CLS
     fun airDirAction(ctx: Context) = sp(ctx).getString("airdir_action", null) ?: ""
-
-    /** ② 音乐卡片在没有媒体会话时的兜底播放器 */
-    fun musicPkg(ctx: Context) = sp(ctx).getString("music_pkg", null) ?: DEF_MUSIC_PKG
 
     /**
      * ★ v1.4.96：**最近任务（后台应用列表）**入口包名。
