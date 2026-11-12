@@ -124,8 +124,8 @@
 - 发布任务使用 Java 17、Android SDK 34、Build Tools 34.0.0 和 NDK 28.2.13676358，执行 `:app:assembleRelease --no-daemon`。
 - 构建目录中必须恰好有一个 APK；随后用四个 Secrets 重签并用 `apksigner verify` 校验。
 - Secrets 名称：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。不得把 keystore、密码或 Base64 内容提交到仓库。
-- CI 将 Gradle 产物复制为 `dist/CarDockBar-4.5.0.apk`（版本号从 APK 和 `app/build.gradle` 交叉校验），并生成 `update.json`、`SHA256SUMS`。
-- GitHub Release tag 为 `v4.5.0`，标题格式为 `CarDockBar 4.5.0`；发布资产名与本地 `Banana_Dock-4.5.0.apk` 有意不同，不要混写。
+- CI 将 Gradle 产物复制为 `dist/CarDockBar-<versionName>-r<run>.apk`（当前版本形如 `CarDockBar-4.5.0-r123.apk`）。`versionName` / `versionCode` 仍只由 APK 与 `app/build.gradle` 交叉校验，CI 不改写它们，因此同一版本的新旧包可以互相覆盖安装。每次构建另写自己的 `update.json` 和 `SHA256SUMS`。
+- 每次成功发布都新建 GitHub Release，tag 为 `v<versionName>-r<run>`（同一次 run 重跑时为 `v<versionName>-r<run>-a<attempt>`），标题为 `CarDockBar <versionName> (r<run>)`。已有 Release 不会被覆盖或删除。发布资产名与本地 `Banana_Dock-4.5.0.apk` 有意不同，不要混写。
 - 普通文档提交不要无意包含发布关键词，避免触发 Release。
 
 ## 4. 当前设置页和 UI 结构
