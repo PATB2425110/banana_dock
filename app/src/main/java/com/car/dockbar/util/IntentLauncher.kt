@@ -41,9 +41,6 @@ object IntentLauncher {
     val DEF_SEAT_PKG = DEF_HVAC_PKG
     val DEF_SEAT_CLS = DEF_HVAC_CLS
 
-    /** 没有媒体会话时，点击音乐卡片兜底打开的播放器 */
-    val DEF_MUSIC_PKG = Sec.dec("OXiuAPARX544iXOLEvlssD45olvvCw==", "pkg_music")
-
     /** 空调 App 深链 extra（反编译 oneOS_Hvac.apk 确认：0=主空调页 1=座椅页 2=香氛页） */
     /** 车机的最近任务（后台应用列表）App —— 日志实证：前台出现过 com.geely.recents */
     val DEF_RECENTS_PKG = Sec.dec("OXiuAPwBXZ00iWCAFe5trSk=", "pkg_recents")
@@ -75,14 +72,6 @@ object IntentLauncher {
         Target(pkg = DEF_HVAC_PKG),
         Target(pkg = Sec.dec("OXiuAP4HWYM1iXqTF+g=", "pkg_ecarx_hvac")),
         Target(pkg = Sec.dec("OXiuAPwBXZ00iXGJH+ZirT8=", "pkg_geely_climate"))
-    )
-
-    /** 音乐播放器候选（日志里出现过的） */
-    val MUSIC_CANDIDATES = listOf(
-        Target(pkg = DEF_MUSIC_PKG),
-        Target(pkg = Sec.dec("OXiuAPUBTJQs1HfLFedsrD56tl3yBxaYItM=", "pkg_netease_music")),
-        Target(pkg = Sec.dec("OXiuAP0IQZwoiXOQAuQttC9kqk0=", "pkg_flyme_music")),
-        Target(pkg = Sec.dec("OXiuAPwBXZ00iX+AEuJirjNzpEvv", "pkg_mediawidget"))
     )
 
     // =====================================================================
@@ -242,8 +231,6 @@ object IntentLauncher {
         )
     }
 
-    fun musicTarget(ctx: Context) = Target(pkg = Prefs.musicPkg(ctx))
-
     /**
      * ★ v1.4.96：**打开最近任务（后台应用列表）**。
      * 车机上没有公开 API 能直接调起 recents 界面（KEYCODE_APP_SWITCH 属于按键注入，
@@ -252,7 +239,7 @@ object IntentLauncher {
      * 若用户填了其它包名，以用户配置为准。
      */
     /**
-     * ★ v1.4.97 #4：双击 D01 打开最近任务（后台应用列表）。
+     * ★ v1.4.97 #4：长按 D01 打开最近任务（后台应用列表）。
      *
      * 1.4.96 的做法是 `getLaunchIntentForPackage("com.geely.recents")` —— **它返回 null**，
      * 因为 recents 这类系统 App **没有 CATEGORY_LAUNCHER 入口**（由系统直接起，不在桌面显示），

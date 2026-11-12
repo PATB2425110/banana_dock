@@ -1,6 +1,9 @@
 package com.car.dockbar.model
 
 import android.content.Context
+import com.car.dockbar.dock.DockCatalog
+import com.car.dockbar.dock.GestureMaps
+import com.car.dockbar.dock.GesturePatch
 import com.car.dockbar.util.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,7 +26,9 @@ data class DockEntry(
     /** kind=app 的 Activity 全名，可为空（空则用 LAUNCHER intent 启动） */
     val cls: String = "",
     /** 占几个等分槽位（音乐卡片默认 3） */
-    val span: Int = 1
+    val span: Int = 1,
+    /** 缺省表示沿用控件自己的单击、长按。 */
+    val gestures: GesturePatch? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -32,6 +37,7 @@ data class DockEntry(
         put("label", label)
         put("cls", cls)
         put("span", span)
+        gestures?.let { put("gestures", GestureMaps.toJson(it)) }
     }
 
     companion object {
@@ -41,13 +47,14 @@ data class DockEntry(
             action = o.optString("action"),
             label = o.optString("label"),
             cls = o.optString("cls", ""),
-            span = o.optInt("span", 1).coerceIn(1, 6)
+            span = o.optInt("span", 1).coerceIn(1, 6),
+            gestures = GestureMaps.parsePatch(o.optJSONObject("gestures"))
         )
     }
 }
 
 /**
- * 内置控件清单。每个 action 对应一个 View，由 [com.car.dockbar.ui.DockEntryViewFactory] 生成。
+ * 内置控件清单。每个 action 对应一个 View，由 [com.car.dockbar.dock.DockCatalog] 生成。
  *
  * 顺序即默认 Dock 的默认排布，与原硬编码版本完全一致（音乐卡片占 3 槽）。
  */
@@ -68,7 +75,7 @@ enum class Builtin(
     val hidden: Boolean = false
 ) {
     // ── [D01] 返回桌面 ─────────────────────────
-    HOME("home", "返回桌面", 1, false, "单击返回桌面 · 双击打开最近任务（后台应用列表）"),
+    HOME("home", "返回桌面", 1, false, "单击返回桌面 · 长按打开最近任务（后台应用列表）"),
     // ── [D02] 音乐信息卡 ────────────────────────
     // ★ v3.13.8：宽度与 span 解耦 —— 弹性区间 295~500px（总宽减去全部固定项），span 仅元数据
     MUSIC("music", "音乐信息", 3, true, "封面 + 歌名 + 播放键，宽度自适应 295~500px"),
@@ -266,15 +273,17 @@ object DockEntries {
 
     fun reset(ctx: Context) = save(ctx, defaults())
 
-    /** 追加一个内置控件（已存在则忽略，避免重复堆叠） */
-    fun addBuiltin(ctx: Context, b: Builtin): List<DockEntry> {
+    fun addWidget(ctx: Context, action: String): List<DockEntry> {
+        val widget = DockCatalog.of(action) ?: return load(ctx)
         val list = load(ctx)
-        if (list.none { it.kind == "builtin" && it.action == b.action }) {
-            list.add(DockEntry("b_${b.action}", "builtin", b.action, b.label, span = b.span))
+        if (list.none { it.kind == "builtin" && it.action == widget.spec.action }) {
+            list.add(DockEntry("b_${widget.spec.action}", "builtin", widget.spec.action, widget.spec.label, span = widget.spec.span))
             save(ctx, list)
         }
         return list
     }
+
+    fun addBuiltin(ctx: Context, b: Builtin): List<DockEntry> = addWidget(ctx, b.action)
 
     /** 追加一个自定义 App；同包名可重复添加（比如放两个音乐入口） */
     fun addApp(ctx: Context, label: String, pkg: String, cls: String): List<DockEntry> {

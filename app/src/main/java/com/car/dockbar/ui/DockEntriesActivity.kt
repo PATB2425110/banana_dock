@@ -29,6 +29,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
+import com.car.dockbar.dock.DockCatalog
 import com.car.dockbar.model.Builtin
 import com.car.dockbar.model.DockEditorOrder
 import com.car.dockbar.model.DockEntries
@@ -203,9 +204,11 @@ class DockEntriesActivity : AppCompatActivity() {
             availableApps.filter { (it.action in systemPackages) == systemCategory }
         } else {
             val added = entries.filter { it.kind == "builtin" }.mapTo(HashSet()) { it.action }
-            Builtin.values().filter { !it.hidden && it.action !in added }.map {
-                DockEntry("b_${it.action}", "builtin", it.action, it.label, span = it.span)
-            }
+            DockCatalog.builtins()
+                .filter { !it.spec.hidden && it.spec.action !in added }
+                .map { widget ->
+                    DockEntry("b_${widget.spec.action}", "builtin", widget.spec.action, widget.spec.label, span = widget.spec.span)
+                }
         }
         poolTitle.text = if (showApps) "添加应用 · ${if (systemCategory) "系统应用" else "个人应用"}" else "可添加控件 · ${candidates.size} 项"
         poolHint.text = when {
@@ -354,7 +357,7 @@ class DockEntriesActivity : AppCompatActivity() {
 
     private fun bindIcon(view: ImageView, entry: DockEntry) {
         if (entry.kind == "builtin") {
-            view.setImageResource(builtinIcon(entry.action))
+            view.setImageResource(DockCatalog.of(entry.action)?.spec?.catalogIcon ?: R.drawable.ic_car)
             return
         }
         val cached = icons[entry.action]
@@ -370,23 +373,6 @@ class DockEntriesActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    private fun builtinIcon(action: String): Int = when (Builtin.of(action)) {
-        Builtin.HOME -> R.drawable.ic_home_circle
-        Builtin.MUSIC, Builtin.LYRIC -> R.drawable.ic_music_note
-        Builtin.VOLUME -> R.drawable.ic_volume
-        Builtin.SETTINGS -> R.drawable.ic_car
-        Builtin.APP_DRAWER -> R.drawable.ic_apps
-        Builtin.AIR -> R.drawable.ic_airflow
-        Builtin.VENT -> R.drawable.ic_seat_vent
-        Builtin.SEAT -> R.drawable.ic_seat_open
-        Builtin.SEAT_HEAT -> R.drawable.ic_seat_hot_03
-        Builtin.RECIRC -> R.drawable.ic_recirc
-        Builtin.DEFROST_FRONT -> R.drawable.ic_defrost
-        Builtin.DEFROST_REAR -> R.drawable.ic_rear_defrost
-        Builtin.STEERING_HEAT -> R.drawable.ic_sw_heat_03
-        else -> R.drawable.ic_car
     }
 
     private fun confirmReset() {

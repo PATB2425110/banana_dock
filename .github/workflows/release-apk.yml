@@ -186,8 +186,15 @@ jobs:
               raise SystemExit('APK version differs from app/build.gradle; refusing to publish')
           if not re.fullmatch(r'[0-9A-Za-z][0-9A-Za-z.+-]*', version_name):
               raise SystemExit('versionName is not safe for a release tag/asset name')
-          tag = 'v' + version_name
-          filename = 'CarDockBar-' + version_name + '.apk'
+          # Keep Gradle versionName/versionCode inside the APK. The run id lives only in
+          # the tag and filename, so a later build can be replaced on-device by an older one.
+          run_number = os.environ.get('GITHUB_RUN_NUMBER', '')
+          run_attempt = os.environ.get('GITHUB_RUN_ATTEMPT', '1')
+          if not re.fullmatch(r'[1-9][0-9]*', run_number) or not re.fullmatch(r'[1-9][0-9]*', run_attempt):
+              raise SystemExit('Invalid GitHub run number or attempt')
+          build = run_number if run_attempt == '1' else run_number + '-a' + run_attempt
+          tag = 'v' + version_name + '-r' + build
+          filename = 'CarDockBar-' + version_name + '-r' + build + '.apk'
           dist = Path('dist')
           dist.mkdir(exist_ok=True)
           apk = dist / filename
@@ -198,6 +205,8 @@ jobs:
               'applicationId': application_id,
               'versionCode': int(version_code),
               'versionName': version_name,
+              'runNumber': int(run_number),
+              'runAttempt': int(run_attempt),
               'minSdk': int(min_sdk.group(1)),
               'tag': tag,
               'commit': os.environ['GITHUB_SHA'],
@@ -213,7 +222,9 @@ jobs:
           (dist / 'update.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
           (dist / 'SHA256SUMS').write_text(digest + '  ' + filename + '\n', encoding='utf-8')
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
-              output.write('RELEASE_TAG=' + tag + '\nVERSION_NAME=' + version_name + '\nVERSION_CODE=' + version_code + '\n')
+              output.write(
+                  'RELEASE_TAG=' + tag + '\nVERSION_NAME=' + version_name
+                  + '\nVERSION_CODE=' + version_code + '\nRELEASE_BUILD=r' + build + '\n')
           PY
 
       - name: Retain release artifacts
@@ -224,7 +235,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # No --clobber: rerunning a published run must not silently replace its APK.
+      # New tag every run. Never upload --clobber: an existing APK stays downloadable,
+      # and the APK versionCode is unchanged so an older build can be installed over a bad one.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -240,10 +252,14 @@ jobs:
             cat "$RUNNER_TEMP/latest-release-error" >&2
             exit 1
           fi
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists and will not be replaced."
+            exit 1
+          fi
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "CarDockBar $VERSION_NAME" --generate-notes --latest="$make_latest" \
-            --notes "<!-- android-version-code: $VERSION_CODE -->"$'\n\n'"Signed universal APK (arm64-v8a, armeabi-v7a, x86_64). See update.json and SHA256SUMS for version and integrity metadata."
+            --title "CarDockBar $VERSION_NAME ($RELEASE_BUILD)" --generate-notes --latest="$make_latest" \
+            --notes "<!-- android-version-code: $VERSION_CODE -->"$'\n\n'"Build $RELEASE_BUILD of $VERSION_NAME. versionCode is unchanged, so an older build of this version can be installed over this one. Signed universal APK (arm64-v8a, armeabi-v7a, x86_64). See update.json and SHA256SUMS for integrity metadata."
 
       - name: Remove signing key
         if: always()
