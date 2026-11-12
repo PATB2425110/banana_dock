@@ -1,0 +1,377 @@
+package com.car.dockbar.ui
+
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.graphics.drawable.Drawable
+import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
+import com.car.dockbar.R
+import com.car.dockbar.model.AppDrawerApp
+import com.car.dockbar.util.AccessibilityKeep
+import com.car.dockbar.util.Logx
+import com.car.dockbar.util.Prefs
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+/**
+ * 管理常驻应用设置页面及已安装应用目录。
+ *
+ * 本页面仅将 Activity 作为上下文使用，不依赖宿主回调，
+ * 因而由设置页面控制器承载时，
+ * 常驻规则仍可独立使用。
+ */
+class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_APPS) {
+    override val root: LinearLayout
+        get() = findViewById(R.id.cardDockApps) ?: error("cardDockApps is not bound")
+
+    private val iconCache = HashMap<String, Drawable?>()
+    private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor {
+        Thread(it, "resident-app-icons").apply { isDaemon = true }
+    }
+
+    @Volatile
+    private var systemPkgCache: Set<String>? = null
+    @Volatile
+    private var residentInstalledApps: List<ResidentAppItem> = emptyList()
+    @Volatile
+    private var residentCatalogLoading = false
+    @Volatile
+    private var destroyed = false
+
+    private var residentAppsPanel: ResidentAppsPanel? = null
+
+    override fun create() {
+        val page = root
+        val host = findViewById<LinearLayout>(R.id.llDockApps)
+        val addButton = findViewById<Button>(R.id.btnAddApp)
+        val detectionButton = findViewById<Button>(R.id.btnGrantAccessibility)
+        residentAppsPanel = ResidentAppsPanel(activity, page, host, addButton, detectionButton)
+        addButton.setOnClickListener { pickInstalledAppForDockList() }
+        detectionButton.setOnClickListener { openAccessibilitySettings() }
+        findOptionalViewById<Button>(R.id.btnGrantAccessibilityDock)?.setOnClickListener {
+            openAccessibilitySettings()
+        }
+        prewarmSystemPkgs()
+        renderDockAppList()
+    }
+
+
+    override fun onShown() {
+        prewarmSystemPkgs()
+        renderDockAppList()
+        refreshAccStatus()
+    }
+
+    override fun onResume() {
+        refreshAccStatus()
+        prewarmSystemPkgs(force = true)
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        iconExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
+    private fun prewarmSystemPkgs(force: Boolean = false) {
+        if (residentCatalogLoading || (!force && systemPkgCache != null)) return
+        residentCatalogLoading = true
+        Thread {
+            val installed = runCatching { packageManager.getInstalledApplications(0) }
+                .getOrDefault(emptyList())
+            val nameOrder = AppDisplayNameOrder.comparator()
+            residentInstalledApps = installed.distinctBy { it.packageName }.map { info ->
+                ResidentAppItem(
+                    info.packageName,
+                    runCatching { packageManager.getApplicationLabel(info).toString() }
+                        .getOrDefault(info.packageName),
+                    (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                )
+            }.sortedWith(Comparator { left, right ->
+                val label = nameOrder.compare(left.label, right.label)
+                if (label != 0) label else left.pkg.compareTo(right.pkg)
+            })
+            systemPkgCache = installed
+                .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 }
+                .mapTo(HashSet()) { it.packageName }
+            residentCatalogLoading = false
+            main.post {
+                if (!destroyed) renderDockAppList()
+            }
+        }.apply {
+            isDaemon = true
+            name = "resident-app-catalog"
+        }.start()
+    }
+
+    /**
+     * 在不阻塞主线程的情况下加载单个常驻应用图标，缓存与线程池由本页面管理。
+     * 后续若将图标加载集中管理，
+     * 图标设置页应复用相同的辅助接口约定。
+     */
+    private fun loadAppIconAsync(pkg: String, image: ImageView) {
+        synchronized(iconCache) {
+            if (iconCache.containsKey(pkg)) {
+                iconCache[pkg]?.let(image::setImageDrawable)
+                return
+            }
+        }
+        image.tag = pkg
+        runCatching {
+            iconExecutor.execute {
+                val drawable = runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
+                synchronized(iconCache) { iconCache[pkg] = drawable }
+                main.post {
+                    if (!destroyed && image.tag == pkg && drawable != null) {
+                        image.setImageDrawable(drawable)
+                    }
+                }
+            }
+        }.onFailure { Logx.e("常驻应用图标加载失败", it) }
+    }
+
+    private fun renderDockAppList() {
+        val panel = residentAppsPanel ?: return
+        val always = Prefs.dockAlwaysShowApps(this)
+        val customHide = Prefs.dockCustomHideApps(this)
+        val defaults = Prefs.DEFAULT_DOCK_HIDE.mapTo(HashSet()) { it.first }
+        val apps = residentInstalledApps
+        val packages = apps.map { it.pkg }
+        val selected = ResidentAppRules.selected(packages, always, defaults, customHide)
+        panel.render(apps, selected, ::loadAppIconAsync) { pkg, on ->
+            val a = Prefs.dockAlwaysShowApps(this).toMutableSet()
+            val h = Prefs.dockCustomHideApps(this).toMutableSet()
+            if (on) {
+                a.add(pkg)
+                h.remove(pkg)
+            } else {
+                a.remove(pkg)
+                if (pkg !in defaults) h.add(pkg) else h.remove(pkg)
+            }
+            Prefs.setDockAlwaysShowApps(this, a)
+            Prefs.setDockCustomHideApps(this, h)
+            notifyAppsChanged()
+            panel.setSelection(ResidentAppRules.selected(packages, a, defaults, h))
+            Logx.d("名单：$pkg → ${if (on) "常驻显示" else "隐藏"}")
+        }
+        refreshAccStatus()
+    }
+
+    private fun pickInstalledAppForDockList() {
+        val loading = AlertDialog.Builder(this)
+            .setTitle("正在读取已安装应用…")
+            .setCancelable(true)
+            .create()
+        loading.show()
+        loading.applyDockSafe()
+        Thread {
+            val pm = packageManager
+            val items = runCatching {
+                pm.queryIntentActivities(
+                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+                ).asSequence()
+                    .mapNotNull { it.activityInfo }
+                    .map { info ->
+                        val appInfo = info.applicationInfo
+                        ResidentChooserCandidate(
+                            app = AppDrawerApp(
+                                label = info.loadLabel(pm).toString(),
+                                packageName = info.packageName,
+                                activityName = info.name
+                            ),
+                            isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                        )
+                    }
+                    .distinctBy { it.app.packageName }
+                    .sortedBy { it.app.label.lowercase() }
+                    .toList()
+            }.getOrDefault(emptyList())
+            main.post {
+                runCatching { loading.dismiss() }
+                if (!destroyed) showInstalledAppPicker(items)
+            }
+        }.start()
+    }
+
+    private fun showInstalledAppPicker(items: List<ResidentChooserCandidate>) {
+        if (items.isEmpty()) {
+            toastOnce("没有读到可启动的应用")
+            return
+        }
+        val twoCol = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(10), dp(4), dp(10), dp(8))
+        }
+        val (colSys, bodySys) = appListColumn("系统应用")
+        val (colUser, bodyUser) = appListColumn("个人应用")
+        twoCol.addView(colSys)
+        twoCol.addView(colUser)
+
+        lateinit var dialog: AlertDialog
+        fun addRow(candidate: ResidentChooserCandidate, body: LinearLayout) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = ContextCompat.getDrawable(this@ResidentSettingsPage, R.drawable.bg_field)
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4) }
+                setOnClickListener {
+                    runCatching { dialog.dismiss() }
+                    addDockListApp(candidate.app.packageName, candidate.app.label)
+                }
+            }
+            row.addView(ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                runCatching { setImageDrawable(packageManager.getApplicationIcon(candidate.app.packageName)) }
+                    .onFailure { setImageResource(R.drawable.ic_car) }
+            })
+            row.addView(TextView(this).apply {
+                text = "${candidate.app.label}\n${candidate.app.packageName}"
+                setTextColor(0xFFEDEFF3.toInt())
+                textSize = 14f
+                setPadding(dp(8), 0, 0, 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+            })
+            body.addView(row)
+        }
+        items.forEach { addRow(it, if (it.isSystem) bodySys else bodyUser) }
+        listOf(bodySys to "（无系统应用）", bodyUser to "（无个人应用）").forEach { (body, tip) ->
+            if (body.childCount == 0) {
+                body.addView(TextView(this).apply {
+                    text = tip
+                    setTextColor(ContextCompat.getColor(this@ResidentSettingsPage, R.color.text_secondary))
+                    textSize = 13f
+                    setPadding(dp(6), dp(6), 0, dp(6))
+                })
+            }
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(twoCol)
+        }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("选择要添加的应用")
+            .setView(scroll)
+            .setNegativeButton("取消", null)
+            .show()
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.7f).toInt(), dp(434))
+    }
+
+    private fun appListColumn(title: String): Pair<LinearLayout, LinearLayout> {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            )
+        }
+        column.addView(TextView(this).apply {
+            text = title
+            setTextColor(0xFFEDEFF3.toInt())
+            textSize = 14f
+            typeface = AppFont.bold(this@ResidentSettingsPage)
+            setPadding(dp(4), dp(2), dp(4), dp(6))
+        })
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        column.addView(body)
+        return column to body
+    }
+
+    private fun addDockListApp(pkg: String, label: String) {
+        val defaults = Prefs.DEFAULT_DOCK_HIDE.map { it.first }.toSet()
+        val always = Prefs.dockAlwaysShowApps(this).toMutableSet()
+        val customHide = Prefs.dockCustomHideApps(this).toMutableSet()
+        if (pkg in defaults) {
+            always.add(pkg)
+            customHide.remove(pkg)
+        } else {
+            always.remove(pkg)
+            customHide.add(pkg)
+        }
+        Prefs.setDockAlwaysShowApps(this, always)
+        Prefs.setDockCustomHideApps(this, customHide)
+        notifyAppsChanged()
+        renderDockAppList()
+        Logx.d("已加入名单：$label（$pkg）→ ${if (pkg in always) "常驻显示" else "隐藏"}")
+    }
+
+    private fun notifyAppsChanged() {
+        runCatching {
+            sendBroadcast(Intent(DockOverlayService.ACTION_APPS_CHANGED).setPackage(packageName))
+        }.onFailure { Logx.e("发送名单变更广播失败", it) }
+    }
+
+    private fun openAccessibilitySettings() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }.onFailure { Logx.e("打开无障碍设置失败", it) }
+    }
+
+    private fun refreshAccStatus() {
+        AccessibilityKeep.restore(this)
+        val enabled = AccessibilityKeep.isEnabled(this)
+        residentAppsPanel?.setDetection(enabled)
+        val current = ForegroundTracker.currentPackage
+        val state = if (enabled) "已开启" else "未开启"
+        val tail = if (enabled) {
+            if (current != null) "（当前前台：$current）" else ""
+        } else {
+            " —— 名单需先开启无障碍才生效"
+        }
+        findOptionalViewById<TextView>(R.id.tvAccPerm)?.apply {
+            text = if (enabled) "已授权" else "未授权"
+            setTextColor(permColor(enabled))
+        }
+        findOptionalViewById<View>(R.id.btnGrantAccessibilityDock)?.visibility = View.VISIBLE
+        findOptionalViewById<TextView>(R.id.tvAccHint)?.visibility = if (enabled) View.GONE else View.VISIBLE
+        findOptionalViewById<TextView>(R.id.tvAccStatus)?.text = android.text.SpannableStringBuilder().apply {
+            append("前台应用检测：")
+            val start = length
+            append(state)
+            setSpan(
+                android.text.style.TypefaceSpan(AppFont.bold(this@ResidentSettingsPage)),
+                start, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            append(tail)
+        }
+    }
+
+    private fun permColor(enabled: Boolean): Int =
+        if (enabled) 0xFF3DDC97.toInt() else ContextCompat.getColor(this, R.color.warn)
+
+    private fun AlertDialog.applyDockSafe(): AlertDialog {
+        if (Prefs.dockAtBottom(this@ResidentSettingsPage)) {
+            window?.decorView?.setPadding(
+                0, 0, 0,
+                Prefs.dockHeightPx(this@ResidentSettingsPage) +
+                    Prefs.dockMarginPx(this@ResidentSettingsPage) + dp(12)
+            )
+        }
+        return this
+    }
+
+    private data class ResidentChooserCandidate(
+        val app: AppDrawerApp,
+        val isSystem: Boolean
+    )
+}
