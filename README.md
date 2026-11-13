@@ -51,13 +51,13 @@ Release 构建启用代码和资源缩减；本地构建使用 Gradle 配置中�
 
 ### GitHub Actions 发布
 
-发布 workflow 支持默认分支上的发布关键词提交和手动触发。发布所需 Secrets：
+发布 workflow 支持默认分支上以 `ci:` 开头、并包含「发布 / 新版」或英文 `release` / `new version` 的提交，以及手动触发。例如 `ci: 发布新版本 v4.5.6`、`ci: New version v4.5.6 released`。发布所需 Secrets：
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-不得将 keystore、密码或 Base64 内容提交到仓库。CI 每次发布一个新的 Release，资产名为 `CarDockBar-<versionName>-r<run>.apk`（当前版本形如 `CarDockBar-4.5.0-r123.apk`），并同时生成 `update.json` 和 `SHA256SUMS`。同一版本可以重复构建，已发布的 APK 会保留。
+不得将 keystore、密码或 Base64 内容提交到仓库。关键词触发的自动发布资产名为 `CarDockBar-<versionName>.apk`（当前版本形如 `CarDockBar-4.5.0.apk`）；手动触发仍为 `CarDockBar-<versionName>-r<run>.apk`（形如 `CarDockBar-4.5.0-r123.apk`）。两次发布都生成 `update.json` 和 `SHA256SUMS`。同一版本的自动 tag 不会被覆盖；手动发布每次使用新的运行号 tag，已发布的 APK 会保留。
 
 开发协作与相关资料见 [AGENTS.md](AGENTS.md)。

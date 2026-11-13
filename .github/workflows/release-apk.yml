@@ -48,16 +48,23 @@ jobs:
                   revision = before + '..' + after
               messages = subprocess.check_output(
                   ['git', 'log', '--format=%B%x00', revision], encoding='utf-8')
-              pattern = (
-                  r'发布|发版|新版|版本更新|'
-                  r'\b(?:releas(?:e[sd]?|ing)|publish(?:ed|es|ing)?)\b|'
+              # Release only when a commit starts with "ci" and also contains
+              # 发布/新版, or the English "release" / "new version".
+              prefix = re.compile(r'ci(?:[:：\s]|\u3000|$)', re.IGNORECASE | re.ASCII)
+              keyword = re.compile(
+                  r'发布|新版|'
                   r'\bnew[\s_-]+version\b|'
-                  r'\b(?:bump[\s_-]+version|version[\s_-]+bump)\b'
+                  r'\breleas(?:e[sd]?|ing)\b',
+                  re.IGNORECASE | re.ASCII,
               )
-              requested = bool(re.search(pattern, messages, re.IGNORECASE | re.ASCII))
+              requested = any(
+                  prefix.match(text) and keyword.search(text)
+                  for text in (message.strip() for message in messages.split('\x00'))
+                  if text
+              )
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('release=' + str(requested).lower() + '\n')
-          print('Release requested' if requested else 'No release keyword; skipping APK build')
+          print('Release requested' if requested else 'No ci release commit; skipping APK build')
           PY
 
   release:
@@ -186,15 +193,26 @@ jobs:
               raise SystemExit('APK version differs from app/build.gradle; refusing to publish')
           if not re.fullmatch(r'[0-9A-Za-z][0-9A-Za-z.+-]*', version_name):
               raise SystemExit('versionName is not safe for a release tag/asset name')
-          # Keep Gradle versionName/versionCode inside the APK. The run id lives only in
-          # the tag and filename, so a later build can be replaced on-device by an older one.
+          # Keep Gradle versionName/versionCode inside the APK so builds of the same
+          # version can still replace each other on device. A keyword-triggered push
+          # publishes v<versionName> once. workflow_dispatch keeps v<versionName>-r<run>.
           run_number = os.environ.get('GITHUB_RUN_NUMBER', '')
           run_attempt = os.environ.get('GITHUB_RUN_ATTEMPT', '1')
+          event_name = os.environ.get('GITHUB_EVENT_NAME', '')
           if not re.fullmatch(r'[1-9][0-9]*', run_number) or not re.fullmatch(r'[1-9][0-9]*', run_attempt):
               raise SystemExit('Invalid GitHub run number or attempt')
-          build = run_number if run_attempt == '1' else run_number + '-a' + run_attempt
-          tag = 'v' + version_name + '-r' + build
-          filename = 'CarDockBar-' + version_name + '-r' + build + '.apk'
+          if event_name == 'workflow_dispatch':
+              build = run_number if run_attempt == '1' else run_number + '-a' + run_attempt
+              release_build = 'r' + build
+              tag = 'v' + version_name + '-' + release_build
+              filename = 'CarDockBar-' + version_name + '-' + release_build + '.apk'
+          elif event_name == 'push':
+              # Re-runs reuse v<versionName>. The publish step rejects an existing tag.
+              release_build = ''
+              tag = 'v' + version_name
+              filename = 'CarDockBar-' + version_name + '.apk'
+          else:
+              raise SystemExit('Unexpected release event: ' + event_name)
           dist = Path('dist')
           dist.mkdir(exist_ok=True)
           apk = dist / filename
@@ -224,7 +242,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
               output.write(
                   'RELEASE_TAG=' + tag + '\nVERSION_NAME=' + version_name
-                  + '\nVERSION_CODE=' + version_code + '\nRELEASE_BUILD=r' + build + '\n')
+                  + '\nVERSION_CODE=' + version_code + '\nRELEASE_BUILD=' + release_build + '\n')
           PY
 
       - name: Retain release artifacts
@@ -235,8 +253,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # New tag every run. Never upload --clobber: an existing APK stays downloadable,
-      # and the APK versionCode is unchanged so an older build can be installed over a bad one.
+      # Push releases use one v<versionName> tag. Manual releases use a new
+      # v<versionName>-r<run> tag every run. Never upload --clobber: an existing APK
+      # stays downloadable, and versionCode is unchanged so an older build can be
+      # installed over a bad one.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -256,10 +276,17 @@ jobs:
             echo "::error::Release $RELEASE_TAG already exists and will not be replaced."
             exit 1
           fi
+          if [[ -n "$RELEASE_BUILD" ]]; then
+            release_title="CarDockBar $VERSION_NAME ($RELEASE_BUILD)"
+            release_lead="Build $RELEASE_BUILD of $VERSION_NAME."
+          else
+            release_title="CarDockBar $VERSION_NAME"
+            release_lead="Release $VERSION_NAME."
+          fi
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "CarDockBar $VERSION_NAME ($RELEASE_BUILD)" --generate-notes --latest="$make_latest" \
-            --notes "<!-- android-version-code: $VERSION_CODE -->"$'\n\n'"Build $RELEASE_BUILD of $VERSION_NAME. versionCode is unchanged, so an older build of this version can be installed over this one. Signed universal APK (arm64-v8a, armeabi-v7a, x86_64). See update.json and SHA256SUMS for integrity metadata."
+            --title "$release_title" --generate-notes --latest="$make_latest" \
+            --notes "<!-- android-version-code: $VERSION_CODE -->"$'\n\n'"$release_lead versionCode is unchanged, so an older build of this version can be installed over this one. Signed universal APK (arm64-v8a, armeabi-v7a, x86_64). See update.json and SHA256SUMS for integrity metadata."
 
       - name: Remove signing key
         if: always()
