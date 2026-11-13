@@ -2,20 +2,13 @@ package com.car.dockbar.ui
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
-import android.widget.Checkable
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -23,9 +16,8 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
 
-internal data class ResidentAppItem(val pkg: String, val label: String, val system: Boolean)
 
-/** Settings-only representation of the existing always-show/hide rules. */
+/** 展示黑名单应用，添加和删除后立即更新隐藏规则。 */
 internal class ResidentAppsPanel(
     private val activity: Activity,
     page: LinearLayout,
@@ -34,7 +26,6 @@ internal class ResidentAppsPanel(
     private val detectionButton: Button
 ) {
     private val tiles = LinkedHashMap<String, ResidentAppTile>()
-    private var items = emptyList<ResidentAppItem>()
     private val selectedCount = text("", 21f).apply { typeface = AppFont.bold(activity) }
     private val systemCount = text("", 13f, true)
     private val personalCount = text("", 13f, true)
@@ -43,7 +34,6 @@ internal class ResidentAppsPanel(
     private var currentPackages = emptyList<String>()
     private var currentSystems = emptySet<String>()
     private var searchQuery = ""
-    private var lastSelection = emptySet<String>()
     private var rerender: (() -> Unit)? = null
 
     init {
@@ -52,14 +42,14 @@ internal class ResidentAppsPanel(
         page.background = null
         page.setPadding(0, 0, 0, 0)
         page.addView(text("隐藏 Dock 应用", 30f).apply { typeface = AppFont.bold(activity) })
-        page.addView(text("勾选应用在前台时隐藏 Dock，取消勾选则保持默认显示", 15f, true), lp(12))
+        page.addView(text("列表中的应用在前台时隐藏 Dock，删除后恢复默认显示", 15f, true), lp(12))
 
         val status = card().apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         page.addView(status, lp(22))
         val info = column()
         info.addView(selectedCount)
-        info.addView(text("绿色勾选表示加入隐藏黑名单", 14f, true), lp(12))
-        info.addView(text("点击图标切换，修改立即生效", 13f, true), lp(8))
+        info.addView(text("列表中均为隐藏黑名单应用", 14f, true), lp(12))
+        info.addView(text("通过上方按钮添加，点击应用下方按钮删除，修改立即生效", 13f, true), lp(8))
         status.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val actions = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -84,7 +74,7 @@ internal class ResidentAppsPanel(
 
         page.addView(EditText(activity).apply {
             id = R.id.settingsResidentSearch
-            hint = "搜索应用名称或包名（系统 / 个人）"
+            hint = "搜索黑名单应用名称或包名（系统 / 个人）"
             textSize = 16f
             isSingleLine = true
             addTextChangedListener(object : TextWatcher {
@@ -117,7 +107,7 @@ internal class ResidentAppsPanel(
                 isNestedScrollingEnabled = true
                 addView(body)
             }
-            // Four rows of five slots are visible by default; additional rows scroll independently.
+            // 默认显示四行，每行五个应用，额外条目在各分组内独立滚动。
             group.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(4 * CELL_HEIGHT + 3 * ROW_GAP)).apply { topMargin = dp(18) })
             host.addView(group, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -136,16 +126,15 @@ internal class ResidentAppsPanel(
     }
 
     fun render(
-        apps: List<ResidentAppItem>, selected: Set<String>,
+        apps: List<ResidentAppItem>, blacklist: Set<String>,
         bindIcon: (String, ImageView) -> Unit,
-        onToggle: (String, Boolean) -> Unit
+        onRemove: (String) -> Unit
     ) {
-        rerender = { render(apps, lastSelection, bindIcon, onToggle) }
-        val visible = apps.filter { searchQuery.isBlank() || it.label.contains(searchQuery, true) || it.pkg.contains(searchQuery, true) }
+        rerender = { render(apps, blacklist, bindIcon, onRemove) }
+        val visible = ResidentAppList.blacklistedApps(apps, blacklist, searchQuery)
         val packages = visible.map { it.pkg }
         val systems = visible.filter { it.system }.mapTo(HashSet()) { it.pkg }
         val rebuild = packages != currentPackages || systems != currentSystems || tiles.isEmpty()
-        items = apps
         if (rebuild) {
             currentPackages = packages
             currentSystems = systems
@@ -153,7 +142,7 @@ internal class ResidentAppsPanel(
             fun populate(body: LinearLayout, list: List<ResidentAppItem>) {
                 body.removeAllViews()
                 if (list.isEmpty()) {
-                    body.addView(text(if (searchQuery.isBlank()) "暂无已安装应用" else "没有匹配的应用", 14f, true).apply { gravity = Gravity.CENTER },
+                    body.addView(text(if (searchQuery.isBlank()) "暂无黑名单应用" else "没有匹配的黑名单应用", 14f, true).apply { gravity = Gravity.CENTER },
                         lp(30))
                     return
                 }
@@ -164,10 +153,11 @@ internal class ResidentAppsPanel(
                         dp(CELL_HEIGHT)).apply { if (rowIndex > 0) topMargin = dp(ROW_GAP) })
                     repeat(5) { col ->
                         val app = list.getOrNull(rowIndex * 5 + col)
-                        val view = if (app == null) View(activity) else ResidentAppTile(activity, app).also { tile ->
+                        val view = if (app == null) View(activity) else ResidentAppTile(activity, app) {
+                            onRemove(app.pkg)
+                        }.also { tile ->
                             tiles[app.pkg] = tile
                             bindIcon(app.pkg, tile.icon)
-                            tile.setOnClickListener { onToggle(app.pkg, !tile.isChecked()) }
                         }
                         row.addView(view, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                     }
@@ -176,19 +166,12 @@ internal class ResidentAppsPanel(
             populate(systemBody, visible.filter { it.system })
             populate(personalBody, visible.filterNot { it.system })
         } else {
-            // Label metadata may arrive after the initial background load; do not reset scroll.
+            // 后台加载补全应用名称时，仅更新标签，保留当前滚动位置。
             apps.forEach { tiles[it.pkg]?.updateLabel(it.label) }
         }
-        setSelection(selected)
-    }
-
-    fun setSelection(selected: Set<String>) {
-        lastSelection = selected
-        tiles.forEach { (pkg, tile) -> tile.setChecked(pkg in selected) }
-        selectedCount.text = "隐藏 Dock ${items.count { it.pkg in selected }} 个应用"
-        val visible = items.filter { searchQuery.isBlank() || it.label.contains(searchQuery, true) || it.pkg.contains(searchQuery, true) }
-        systemCount.text = "隐藏 ${visible.count { it.system && it.pkg in selected }} / ${visible.count { it.system }}"
-        personalCount.text = "隐藏 ${visible.count { !it.system && it.pkg in selected }} / ${visible.count { !it.system }}"
+        selectedCount.text = "黑名单共 ${apps.count { it.pkg in blacklist }} 个应用"
+        systemCount.text = "${visible.count { it.system }} 个应用"
+        personalCount.text = "${visible.count { !it.system }} 个应用"
     }
 
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -207,13 +190,15 @@ internal class ResidentAppsPanel(
     private fun color(id: Int) = ContextCompat.getColor(activity, id)
     private fun dp(n: Int) = (n * activity.resources.displayMetrics.density).toInt()
 
-    companion object { private const val CELL_HEIGHT = 96; private const val ROW_GAP = 8 }
+    companion object { private const val CELL_HEIGHT = 120; private const val ROW_GAP = 8 }
 }
 
-private class ResidentAppTile(context: Context, private val app: ResidentAppItem) : LinearLayout(context), Checkable {
-    private var checkedState = false
+private class ResidentAppTile(
+    context: Context,
+    private val app: ResidentAppItem,
+    onRemove: () -> Unit
+) : LinearLayout(context) {
     private var appLabel = app.label
-    private val badge = ResidentCheckBadge(context)
     val icon = ImageView(context).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
         setImageResource(R.drawable.ic_apps)
@@ -227,62 +212,32 @@ private class ResidentAppTile(context: Context, private val app: ResidentAppItem
         includeFontPadding = false
         setTextColor(ContextCompat.getColor(context, R.color.settings_text))
     }
+    private val removeButton = Button(context).apply {
+        text = "删除"
+        textSize = 12f
+        minWidth = 0
+        minimumWidth = 0
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(0, 0, 0, 0)
+        background = ContextCompat.getDrawable(context, R.drawable.bg_field)
+        setTextColor(ContextCompat.getColor(context, R.color.warn))
+        setOnClickListener { onRemove() }
+    }
 
     init {
         orientation = VERTICAL
         gravity = Gravity.CENTER
-        isClickable = true
-        isFocusable = true
         background = ContextCompat.getDrawable(context, R.drawable.bg_settings_nav_idle)
-        val frame = FrameLayout(context)
-        frame.addView(icon, FrameLayout.LayoutParams(dp(45), dp(45), Gravity.TOP or Gravity.START))
-        frame.addView(badge, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.BOTTOM or Gravity.END))
-        addView(frame, LayoutParams(dp(55), dp(55)))
+        addView(icon, LayoutParams(dp(45), dp(45)))
         addView(name, LayoutParams(LayoutParams.MATCH_PARENT, dp(32)).apply { topMargin = dp(4) })
+        addView(removeButton, LayoutParams(dp(56), dp(32)).apply { topMargin = dp(4) })
+        updateDescription()
     }
 
     fun updateLabel(value: String) { appLabel = value; name.text = value; updateDescription() }
-    override fun isChecked(): Boolean = checkedState
-    override fun toggle() { setChecked(!checkedState) }
-    override fun setChecked(checked: Boolean) {
-        checkedState = checked
-        isSelected = checked
-        badge.checked = checked
-        updateDescription()
-    }
     private fun updateDescription() {
-        contentDescription = "$appLabel，${app.pkg}，${if (checkedState) "已加入黑名单，前台时隐藏 Dock" else "未加入黑名单，前台时默认显示 Dock"}"
-    }
-    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
-        super.onInitializeAccessibilityNodeInfo(info)
-        info.className = "android.widget.CheckBox"
-        info.isCheckable = true
-        info.isChecked = checkedState
+        removeButton.contentDescription = "从黑名单中删除 $appLabel（${app.pkg}）"
     }
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-}
-
-private class ResidentCheckBadge(context: Context) : View(context) {
-    var checked = false
-        set(value) { field = value; invalidate() }
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val path = Path()
-    override fun onDraw(canvas: Canvas) {
-        val radius = minOf(width, height) / 2f
-        paint.style = Paint.Style.FILL
-        paint.color = if (checked) 0xFF3DDC97.toInt() else 0xFF39404A.toInt()
-        canvas.drawCircle(width / 2f, height / 2f, radius, paint)
-        if (checked) {
-            paint.color = Color.WHITE
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2 * resources.displayMetrics.density
-            paint.strokeCap = Paint.Cap.ROUND
-            paint.strokeJoin = Paint.Join.ROUND
-            path.reset()
-            path.moveTo(width * .25f, height * .51f)
-            path.lineTo(width * .44f, height * .69f)
-            path.lineTo(width * .77f, height * .32f)
-            canvas.drawPath(path, paint)
-        }
-    }
 }

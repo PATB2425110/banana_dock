@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -14,7 +15,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import com.car.dockbar.R
-import com.car.dockbar.model.AppDrawerApp
 import com.car.dockbar.util.AccessibilityKeep
 import com.car.dockbar.util.Logx
 import com.car.dockbar.util.Prefs
@@ -139,16 +139,13 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
     private fun renderDockAppList() {
         val panel = residentAppsPanel ?: return
         val blacklist = Prefs.dockHideApps(this)
-        val apps = residentInstalledApps
-        val packages = apps.map { it.pkg }
-        val selected = packages.filterTo(LinkedHashSet()) { it in blacklist }
-        panel.render(apps, selected, ::loadAppIconAsync) { pkg, on ->
+        panel.render(residentInstalledApps, blacklist, ::loadAppIconAsync) { pkg ->
             val updated = Prefs.dockHideApps(this).toMutableSet()
-            if (on) updated.add(pkg) else updated.remove(pkg)
+            updated.remove(pkg)
             Prefs.setDockHideApps(this, updated)
             notifyAppsChanged()
-            panel.setSelection(updated)
-            Logx.d("黑名单：$pkg → ${if (on) "隐藏" else "显示"}")
+            renderDockAppList()
+            Logx.d("已从 Dock 黑名单删除：$pkg → 默认显示")
         }
         refreshAccStatus()
     }
@@ -163,23 +160,17 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         Thread {
             val pm = packageManager
             val items = runCatching {
-                pm.queryIntentActivities(
-                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-                ).asSequence()
-                    .mapNotNull { it.activityInfo }
+                pm.getInstalledApplications(0).asSequence()
                     .map { info ->
-                        val appInfo = info.applicationInfo
-                        ResidentChooserCandidate(
-                            app = AppDrawerApp(
-                                label = info.loadLabel(pm).toString(),
-                                packageName = info.packageName,
-                                activityName = info.name
-                            ),
-                            isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                        ResidentAppItem(
+                            pkg = info.packageName,
+                            label = runCatching { pm.getApplicationLabel(info).toString() }
+                                .getOrDefault(info.packageName),
+                            system = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                         )
                     }
-                    .distinctBy { it.app.packageName }
-                    .sortedBy { it.app.label.lowercase() }
+                    .distinctBy { it.pkg }
+                    .sortedBy { it.label.lowercase() }
                     .toList()
             }.getOrDefault(emptyList())
             main.post {
@@ -189,9 +180,9 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         }.start()
     }
 
-    private fun showInstalledAppPicker(items: List<ResidentChooserCandidate>) {
+    private fun showInstalledAppPicker(items: List<ResidentAppItem>) {
         if (items.isEmpty()) {
-            toastOnce("没有读到可启动的应用")
+            toastOnce("没有读到已安装应用")
             return
         }
         val twoCol = LinearLayout(this).apply {
@@ -203,8 +194,11 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         twoCol.addView(colSys)
         twoCol.addView(colUser)
 
+        val choices = ResidentAppList.choices(items, Prefs.dockHideApps(this))
         lateinit var dialog: AlertDialog
-        fun addRow(candidate: ResidentChooserCandidate, body: LinearLayout) {
+        fun addRow(choice: ResidentAppChoice, body: LinearLayout) {
+            val candidate = choice.app
+            val alreadyAdded = choice.selected
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -214,21 +208,29 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(4) }
-                setOnClickListener {
-                    runCatching { dialog.dismiss() }
-                    addDockListApp(candidate.app.packageName, candidate.app.label)
+                isFocusable = true
+                contentDescription = "${candidate.label}，${candidate.pkg}，${if (alreadyAdded) "已加入黑名单" else "点击加入黑名单"}"
+                if (!alreadyAdded) {
+                    setOnClickListener {
+                        runCatching { dialog.dismiss() }
+                        addDockListApp(candidate.pkg, candidate.label)
+                    }
                 }
             }
             row.addView(ImageView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                runCatching { setImageDrawable(packageManager.getApplicationIcon(candidate.app.packageName)) }
-                    .onFailure { setImageResource(R.drawable.ic_car) }
+                setImageResource(R.drawable.ic_car)
+                loadAppIconAsync(candidate.pkg, this)
             })
-            row.addView(TextView(this).apply {
-                text = "${candidate.app.label}\n${candidate.app.packageName}"
+            row.addView(CheckBox(this).apply {
+                text = "${candidate.label}${if (alreadyAdded) "（已添加）" else ""}\n${candidate.pkg}"
                 setTextColor(0xFFEDEFF3.toInt())
                 textSize = 14f
+                isChecked = alreadyAdded
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 setPadding(dp(8), 0, 0, 0)
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
@@ -236,7 +238,7 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
             })
             body.addView(row)
         }
-        items.forEach { addRow(it, if (it.isSystem) bodySys else bodyUser) }
+        choices.forEach { addRow(it, if (it.app.system) bodySys else bodyUser) }
         listOf(bodySys to "（无系统应用）", bodyUser to "（无个人应用）").forEach { (body, tip) ->
             if (body.childCount == 0) {
                 body.addView(TextView(this).apply {
@@ -287,7 +289,7 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
 
     private fun addDockListApp(pkg: String, label: String) {
         val blacklist = Prefs.dockHideApps(this).toMutableSet()
-        blacklist.add(pkg)
+        if (!blacklist.add(pkg)) return
         Prefs.setDockHideApps(this, blacklist)
         notifyAppsChanged()
         renderDockAppList()
@@ -349,8 +351,4 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
         return this
     }
 
-    private data class ResidentChooserCandidate(
-        val app: AppDrawerApp,
-        val isSystem: Boolean
-    )
 }
