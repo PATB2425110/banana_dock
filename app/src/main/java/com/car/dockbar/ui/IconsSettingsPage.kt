@@ -33,7 +33,7 @@ import java.util.concurrent.Executors
 /** 负责图标卡片、启动目标及快捷应用交互，不处理其他设置页面。 */
 class IconsSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_ICONS) {
     companion object {
-        // 常驻应用页也需要加载图标；后续引入共享的已安装应用目录管理类时，
+        // 隐藏 Dock 应用页也需要加载图标；后续引入共享的已安装应用目录管理类时，
         // 可将这些辅助方法迁入其中，无需宿主提供回调。
         private val iconCache = HashMap<String, Drawable?>()
         private val iconExecutor: ExecutorService = Executors.newSingleThreadExecutor()

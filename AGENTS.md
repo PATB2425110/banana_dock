@@ -26,6 +26,12 @@
 - 改发布配置前同时核对本地 Gradle 输出名和 CI 的 `dist/` 重命名规则。
 - 完成后至少做 Markdown 链接/路径检查，并按改动范围运行构建或测试；没有真车证据时必须保留“未验证”标记。
 
+### 0.3 注释与提交约定
+
+- 新增或修改的源码和测试辅助代码注释使用中文，API、类名、方法名及配置键保持既有命名，不因注释语言调整程序行为。
+- Git 提交信息使用中文说明改动目的和主要内容；可以沿用 `feat:`、`fix:`、`docs:` 等类型前缀，但冒号后的摘要和提交正文使用中文。
+- 提交前核对完整差异，包含用户明确要求一起提交的已有改动，不提交构建产物、缓存及本地临时文件；推送前确认当前分支及对应远端。
+
 ## 1. 当前项目快照（当前）
 
 - 项目：`Banana_Dock`，面向 Android 车机的悬浮 Dock 应用。
@@ -63,7 +69,7 @@
 | 外观与风格页面 | `ui/AppearanceSettingsPage.kt`、`ui/AppearanceSettingsLayout.kt` |
 | Dock 图标管理页面 | `ui/IconsSettingsPage.kt`、`ui/IconsSettingsLayout.kt`、`DockEntriesActivity.kt` |
 | 歌词悬浮窗页面 | `ui/LyricsSettingsPage.kt` |
-| 常驻应用页面 | `ui/ResidentSettingsPage.kt` |
+| 隐藏 Dock 应用（黑名单）页面 | `ui/ResidentSettingsPage.kt` |
 | 诊断与日志页面 | `ui/LogsSettingsPage.kt`、`ui/LogsSettingsLayout.kt` |
 | Dock 条目模型与默认布局 | `model/DockEntry.kt` |
 | 快捷应用固定槽位持久化 | `model/AppDrawerApp.kt` |
@@ -78,8 +84,9 @@
 | 车控读写和状态 | `vehicle/VehicleController.kt`、`vehicle/VehicleBridge.kt` |
 | 传感器 | `vehicle/SensorBridge.kt` |
 | 日志、崩溃和上传 | `util/Logx.kt`、`util/LogUploader.kt`、`util/NativeCrashHandler.kt` |
-| 偏好设置和迁移 | `util/Prefs.kt`、`App.kt` |
-| 纯 Kotlin 单元测试 | `app/src/test/java/com/car/dockbar/dock/` |
+| 偏好设置兼容入口与启动 | `util/Prefs.kt`、`App.kt` |
+| Dock 黑名单默认值、迁移与存储 | `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`、`util/DockBlacklistPreferences.kt`、`util/DockBlacklistRules.kt` |
+| 规则、迁移与控件单元测试 | `app/src/test/java/com/car/dockbar/util/`、`app/src/test/java/com/car/dockbar/dock/` |
 
 ## 3. 构建、测试和发布（当前）
 
@@ -138,7 +145,7 @@
 2. 外观与风格：`AppearanceSettingsPage`。
 3. Dock 图标管理：`IconsSettingsPage`。
 4. 歌词悬浮窗：`LyricsSettingsPage`。
-5. 常驻应用设置：`ResidentSettingsPage`。
+5. 隐藏 Dock 应用：`ResidentSettingsPage`。
 6. 诊断与日志：`LogsSettingsPage`。
 
 各页面由 `SettingsPageRegistry.createAll()` 创建并管理生命周期；后续新增设置应优先增加独立页面，而不是把所有控件重新塞回 `MainActivity`。
@@ -156,7 +163,7 @@
 - 按压高亮使用 `res/drawable/bg_item_press.xml`，不要恢复已移除的旧样式。
 - 外观模式包含纯色、透明、渐变和“模糊（测试中）”。其中模糊实现是透明底上叠加灰色层和合成透明度（`GrayOverlayDrawable`），不是抓屏后的高斯模糊，也不申请录屏权限。
 - `DockStatusLabel.kt` 虽仍在源码中，旧交接中的“上方状态小字已全部移除”不能单独作为判断依据；是否显示以 `DockOverlayService` 当前可执行调用为准，新增 UI 时不要根据旧文档擅自恢复常驻状态文字。
-- 当前常驻应用页从 `getInstalledApplications` 取真实已安装应用，分系统/个人两栏；每栏 5 列、至少 4 行，支持应用名/包名搜索，绿色勾选表示前台时 Dock 常驻显示。
+- 当前“隐藏 Dock 应用”页从 `getInstalledApplications` 取真实已安装应用，分系统/个人两栏；每栏 5 列、至少 4 行，支持应用名/包名搜索，绿色勾选表示加入黑名单，该应用在前台时隐藏 Dock；取消勾选则恢复默认显示。
 
 ## 5. Dock 条目、默认布局和交互
 
@@ -209,6 +216,14 @@
 - 真正修改车控前必须经过当前 `VehicleController` 的写入保护；编辑预览不能触发真实动作。
 - 当前默认淡入淡出时长为 350ms；底部手势临时唤出 Dock 默认显示 5000ms；空调状态弹窗默认自动消失 3000ms。设置项可覆盖这些默认值，改动前应以 `Prefs.kt` 为准。
 - 音量弹窗按 1.8 倍绘制，媒体使用系统流 3、导航使用系统流 15，显示和写入使用系统原始流索引，不再额外加减 5；默认 6 秒收起。
+
+### 5.5 Dock 显隐与临时显示（当前）
+
+- 前台显隐入口为 `ui/DockOverlayService.kt` 的 `applyKeepShownForForeground()`，唯一名单来源为 `dock_hide_apps`：命中则隐藏，未命中则保持默认显示。
+- 前台包名为空、空白或尚未取得（例如未开启无障碍）时，设置 `hiddenByApp=false`，不因前台应用隐藏 Dock。不存在“拿不到前台应用就交还全局空闲自动隐藏”的回退逻辑。
+- 全局空闲自动隐藏已经移除，`SHOWN` 状态不会因为无操作而倒计时消失；`pauseAutoHide()`、`onUserIdle()` 等沿用的名称不能作为该功能仍存在的依据。
+- 底部手势或弹窗触发的 `TEMP_SHOW` 临时显示倒计时仍保留。`DockStateMachine.onTempShowTimeout()` 到时仅在 `hiddenByApp=true` 时隐藏，否则转为 `SHOWN`，不得将其与已删除的全局空闲自动隐藏混淆。
+- 黑名单默认值和迁移分别见 `util/DockBlacklistDefaults.kt`、`util/DockBlacklistMigration.kt`；日常读写经 `Prefs` 转发至 `DockBlacklistPreferences`，不改变上述未知前台默认显示策略。
 
 ## 6. 车控接口和安全边界
 
@@ -270,7 +285,7 @@
 - Dock 和歌词窗口需要“显示在其他应用上层”权限。
 - 音乐卡和歌词精确进度依赖通知使用权；安装新 APK 后如果系统重置该特殊授权，需要重新开启。
 - 本地 `.lrc` 兜底才需要相应存储访问；不是所有歌词来源都要求存储权限。
-- 常驻应用前台检测使用无障碍服务；Manifest 中另有通知监听服务、Dock/歌词前台服务和开机接收器。
+- Dock 黑名单前台检测使用无障碍服务；未取得前台包名时默认显示 Dock，不回退到空闲自动隐藏。Manifest 中另有通知监听服务、Dock/歌词前台服务和开机接收器。
 - `AndroidManifest.xml` 同时声明 `QUERY_ALL_PACKAGES` 与对车机包/Launcher 的显式 `queries`；能否枚举或启动目标仍受 Android 版本、系统策略和实际授权影响，不能把声明权限等同于已经取得权限。
 - Manifest 还声明 `WRITE_SECURE_SETTINGS`、`MANAGE_EXTERNAL_STORAGE` 等特殊权限；普通安装不会自动授予，不能将声明写成权限已生效。
 

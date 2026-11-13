@@ -22,11 +22,10 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * 管理常驻应用设置页面及已安装应用目录。
+ * 管理隐藏 Dock 应用设置页面及已安装应用目录。
  *
  * 本页面仅将 Activity 作为上下文使用，不依赖宿主回调，
- * 因而由设置页面控制器承载时，
- * 常驻规则仍可独立使用。
+ * 因而由设置页面控制器承载时，黑名单规则仍可独立使用。
  */
 class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, MainActivity.SECTION_APPS) {
     override val root: LinearLayout
@@ -113,9 +112,8 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
     }
 
     /**
-     * 在不阻塞主线程的情况下加载单个常驻应用图标，缓存与线程池由本页面管理。
-     * 后续若将图标加载集中管理，
-     * 图标设置页应复用相同的辅助接口约定。
+     * 在不阻塞主线程的情况下加载单个已安装应用图标，缓存与线程池由本页面管理。
+     * 后续若将图标加载集中管理，图标设置页应复用相同的辅助接口约定。
      */
     private fun loadAppIconAsync(pkg: String, image: ImageView) {
         synchronized(iconCache) {
@@ -135,32 +133,22 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
                     }
                 }
             }
-        }.onFailure { Logx.e("常驻应用图标加载失败", it) }
+        }.onFailure { Logx.e("隐藏 Dock 应用图标加载失败", it) }
     }
 
     private fun renderDockAppList() {
         val panel = residentAppsPanel ?: return
-        val always = Prefs.dockAlwaysShowApps(this)
-        val customHide = Prefs.dockCustomHideApps(this)
-        val defaults = Prefs.DEFAULT_DOCK_HIDE.mapTo(HashSet()) { it.first }
+        val blacklist = Prefs.dockHideApps(this)
         val apps = residentInstalledApps
         val packages = apps.map { it.pkg }
-        val selected = ResidentAppRules.selected(packages, always, defaults, customHide)
+        val selected = packages.filterTo(LinkedHashSet()) { it in blacklist }
         panel.render(apps, selected, ::loadAppIconAsync) { pkg, on ->
-            val a = Prefs.dockAlwaysShowApps(this).toMutableSet()
-            val h = Prefs.dockCustomHideApps(this).toMutableSet()
-            if (on) {
-                a.add(pkg)
-                h.remove(pkg)
-            } else {
-                a.remove(pkg)
-                if (pkg !in defaults) h.add(pkg) else h.remove(pkg)
-            }
-            Prefs.setDockAlwaysShowApps(this, a)
-            Prefs.setDockCustomHideApps(this, h)
+            val updated = Prefs.dockHideApps(this).toMutableSet()
+            if (on) updated.add(pkg) else updated.remove(pkg)
+            Prefs.setDockHideApps(this, updated)
             notifyAppsChanged()
-            panel.setSelection(ResidentAppRules.selected(packages, a, defaults, h))
-            Logx.d("名单：$pkg → ${if (on) "常驻显示" else "隐藏"}")
+            panel.setSelection(updated)
+            Logx.d("黑名单：$pkg → ${if (on) "隐藏" else "显示"}")
         }
         refreshAccStatus()
     }
@@ -298,21 +286,12 @@ class ResidentSettingsPage(activity: MainActivity) : SettingsPage(activity, Main
     }
 
     private fun addDockListApp(pkg: String, label: String) {
-        val defaults = Prefs.DEFAULT_DOCK_HIDE.map { it.first }.toSet()
-        val always = Prefs.dockAlwaysShowApps(this).toMutableSet()
-        val customHide = Prefs.dockCustomHideApps(this).toMutableSet()
-        if (pkg in defaults) {
-            always.add(pkg)
-            customHide.remove(pkg)
-        } else {
-            always.remove(pkg)
-            customHide.add(pkg)
-        }
-        Prefs.setDockAlwaysShowApps(this, always)
-        Prefs.setDockCustomHideApps(this, customHide)
+        val blacklist = Prefs.dockHideApps(this).toMutableSet()
+        blacklist.add(pkg)
+        Prefs.setDockHideApps(this, blacklist)
         notifyAppsChanged()
         renderDockAppList()
-        Logx.d("已加入名单：$label（$pkg）→ ${if (pkg in always) "常驻显示" else "隐藏"}")
+        Logx.d("已加入 Dock 黑名单：$label（$pkg）→ 隐藏")
     }
 
     private fun notifyAppsChanged() {

@@ -51,14 +51,14 @@ internal class ResidentAppsPanel(
         page.removeAllViews()
         page.background = null
         page.setPadding(0, 0, 0, 0)
-        page.addView(text("常驻应用设置", 30f).apply { typeface = AppFont.bold(activity) })
-        page.addView(text("勾选应用在前台时 Dock 常驻显示，取消勾选则隐藏", 15f, true), lp(12))
+        page.addView(text("隐藏 Dock 应用", 30f).apply { typeface = AppFont.bold(activity) })
+        page.addView(text("勾选应用在前台时隐藏 Dock，取消勾选则保持默认显示", 15f, true), lp(12))
 
         val status = card().apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         page.addView(status, lp(22))
         val info = column()
         info.addView(selectedCount)
-        info.addView(text("绿色勾选表示常驻显示", 14f, true), lp(12))
+        info.addView(text("绿色勾选表示加入隐藏黑名单", 14f, true), lp(12))
         info.addView(text("点击图标切换，修改立即生效", 13f, true), lp(8))
         status.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val actions = LinearLayout(activity).apply {
@@ -185,10 +185,10 @@ internal class ResidentAppsPanel(
     fun setSelection(selected: Set<String>) {
         lastSelection = selected
         tiles.forEach { (pkg, tile) -> tile.setChecked(pkg in selected) }
-        selectedCount.text = "常驻显示 ${items.count { it.pkg in selected }} 个应用"
+        selectedCount.text = "隐藏 Dock ${items.count { it.pkg in selected }} 个应用"
         val visible = items.filter { searchQuery.isBlank() || it.label.contains(searchQuery, true) || it.pkg.contains(searchQuery, true) }
-        systemCount.text = "常驻 ${visible.count { it.system && it.pkg in selected }} / ${visible.count { it.system }}"
-        personalCount.text = "常驻 ${visible.count { !it.system && it.pkg in selected }} / ${visible.count { !it.system }}"
+        systemCount.text = "隐藏 ${visible.count { it.system && it.pkg in selected }} / ${visible.count { it.system }}"
+        personalCount.text = "隐藏 ${visible.count { !it.system && it.pkg in selected }} / ${visible.count { !it.system }}"
     }
 
     private fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -251,7 +251,7 @@ private class ResidentAppTile(context: Context, private val app: ResidentAppItem
         updateDescription()
     }
     private fun updateDescription() {
-        contentDescription = "$appLabel，${app.pkg}，${if (checkedState) "常驻显示" else "不常驻，前台时隐藏 Dock"}"
+        contentDescription = "$appLabel，${app.pkg}，${if (checkedState) "已加入黑名单，前台时隐藏 Dock" else "未加入黑名单，前台时默认显示 Dock"}"
     }
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)

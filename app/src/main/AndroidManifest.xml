@@ -116,8 +116,7 @@
                 android:value="车机歌词悬浮窗：常驻显示当前播放歌曲的滚动歌词" />
         </service>
 
-        <!-- 前台应用检测：判断当前哪个 App 在前台，用于「常驻显示 Dock 的应用名单」。
-             开通过一次后，若系统重启把它从名单里拿掉，应用会用 WRITE_SECURE_SETTINGS 写回。 -->
+        <!-- 前台应用检测：判断当前哪个 App 在前台，用于按 Dock 黑名单切换显隐。 -->
         <service
             android:name=".ui.ForegroundAppService"
             android:enabled="true"

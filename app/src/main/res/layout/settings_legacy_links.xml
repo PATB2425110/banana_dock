@@ -22,7 +22,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:background="@drawable/bg_field"
-        android:text="常驻显示 Dock 栏的应用  →"
+        android:text="隐藏 Dock 应用（黑名单）  →"
         android:textColor="@color/text_primary"
         android:textSize="13sp" />
 

@@ -595,9 +595,9 @@ class DockOverlayService : Service() {
     }
 
     /**
-     * 按「当前前台应用」决定 Dock 是否常驻显示：
-     * 命中「常驻显示名单」→ 不自动隐藏、若已隐藏则显示出来；
-     * 未命中或拿不到前台应用（无障碍未开启）→ 交还全局空闲自动隐藏规则。
+     * 按当前前台应用的 Dock 黑名单决定是否隐藏；不在黑名单的应用保持默认显示。
+     * 前台包名为空或未取得（例如未开启无障碍）时，隐藏标志为 false，保持默认显示。
+     * 全局空闲自动隐藏已移除，这里没有对应的回退规则。
      */
     private fun applyKeepShownForForeground() {
         val pkg = ForegroundTracker.currentPackage
@@ -605,8 +605,8 @@ class DockOverlayService : Service() {
             false
         } else {
             val h = Prefs.isDockHideApp(this, pkg)
-            if (h) Logx.d("前台 $pkg → Dock 隐藏（名单里该应用开关为关 / 属系统全屏应用）")
-            else Logx.d("前台 $pkg → Dock 保持显示（常驻名单命中或未要求隐藏）")
+            if (h) Logx.d("前台 $pkg → Dock 隐藏（命中黑名单）")
+            else Logx.d("前台 $pkg → Dock 保持显示（未命中黑名单）")
             h
         }
         hiddenByApp = hide
@@ -957,18 +957,13 @@ class DockOverlayService : Service() {
             (y - dp(56) - Prefs.dockHeightPx(this) - Prefs.dockMarginPx(this)).coerceAtLeast(0)
         else (y + h + dp(8))
         pop.show(parts.joinToString("　"), delay)
-        // Dock 若处于隐藏态（开了空闲自动隐藏），弹窗期间顺带临时显示一下
+        // Dock 已隐藏时，随状态弹窗临时显示；到时是否收起仍取决于前台黑名单状态。
         if (stateMachine?.state == DockState.HIDDEN) {
             stateMachine?.requestTempShow(delay)
             stateMachine?.onUserIdle()
         }
     }
 
-    /**
-     * 点击 Dock 上的「主驾温度 / 副驾温度 / 风速」时弹出空调控制面板。
-     * 双温共用同一面板（满足「双温都需要这个逻辑」）。
-     * 面板开启期间临时显示 Dock（若开了空闲自动隐藏），收起后恢复。
-     */
     /**
      * 点击 Dock 上的「主驾温度 / 副驾温度」时触发：开关**系统原生的空调窗口**
      * （com.geely.hvac，即车机原本那个），而不是我们自绘的面板。
@@ -1010,7 +1005,7 @@ class DockOverlayService : Service() {
             hvacPop = p
         }
         pop.show(anchor)
-        // Dock 若处于隐藏态（开了空闲自动隐藏），面板期间临时显示一下
+        // Dock 已隐藏时，在面板期间临时显示；收起逻辑由临时显示状态机处理。
         if (stateMachine?.state == DockState.HIDDEN) {
             stateMachine?.requestTempShow(8000L)
         }

@@ -1,5 +1,7 @@
 # ===== Android / Gradle =====
 .gradle/
+.kotlin/
+.superpowers/
 build/
 app/build/
 local.properties

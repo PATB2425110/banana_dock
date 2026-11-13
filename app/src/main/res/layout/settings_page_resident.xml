@@ -12,7 +12,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="常驻显示 Dock 栏的应用"
+        android:text="隐藏 Dock 应用"
         android:textColor="@color/text_primary"
         android:textSize="16sp"
         android:textStyle="bold" />
@@ -21,7 +21,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="开关【开】= 这个应用在前台时 Dock 常驻显示；开关【关】= 这个应用在前台时 Dock 隐藏。系统默认已把全屏/沉浸式应用置为关。需要开启「前台应用检测」（无障碍）才生效。"
+        android:text="勾选应用即加入黑名单，该应用在前台时隐藏 Dock；取消勾选则保持默认显示。需要开启「前台应用检测」（无障碍）才生效。"
         android:textColor="@color/text_secondary"
         android:textSize="12sp" />
 

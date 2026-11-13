@@ -104,7 +104,7 @@ class DockStateMachine(
         pendingTempDelayMs = delayMs
     }
 
-    /** 拖拽/长按这类交互期间常驻显示，不自动消失 */
+    /** 拖拽/长按这类交互期间保持显示，不自动消失 */
     fun requestDragShow() {
         val from = state
         if (state == DockState.SHOWN) {
@@ -183,12 +183,10 @@ class DockStateMachine(
     }
 
     /**
-     * ★★ v1.4.71：按「打开时隐藏 Dock 的应用名单」切换显隐。
+     * 按前台应用是否命中 Dock 黑名单切换显隐。
      *
-     * @param on true = 前台应用在隐藏名单里 → **立刻隐藏 Dock**；
-     *              false = 前台应用不在名单里 → **恢复显示 Dock**。
-     *
-     * 语义翻转自 v1.4.71（之前是「命中就常驻」，与用户预期相反）。
+     * @param on true = 前台应用在黑名单里 → **立刻隐藏 Dock**；
+     *              false = 前台应用不在黑名单里 → **恢复显示 Dock**。
      */
     fun applyHiddenByApp(on: Boolean) {
         if (hiddenByApp == on) {

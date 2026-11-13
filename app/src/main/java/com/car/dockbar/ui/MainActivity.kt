@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         PageSpec(SECTION_APPEARANCE, "外观与风格", R.drawable.ic_nav_home, ::AppearanceSettingsPage),
         PageSpec(SECTION_ICONS, "Dock 图标管理", R.drawable.ic_nav_grid, ::IconsSettingsPage),
         PageSpec(SECTION_LYRIC, "歌词悬浮窗", R.drawable.ic_nav_doc, ::LyricsSettingsPage),
-        PageSpec(SECTION_APPS, "常驻应用设置", R.drawable.ic_nav_list, ::ResidentSettingsPage),
+        PageSpec(SECTION_APPS, "隐藏 Dock 应用", R.drawable.ic_nav_list, ::ResidentSettingsPage),
         PageSpec(SECTION_LOGS, "诊断与日志", R.drawable.ic_nav_pulse, ::LogsSettingsPage)
     )
     private class NavRow(val container: View, val bar: View, val icon: ImageView, val label: TextView)
